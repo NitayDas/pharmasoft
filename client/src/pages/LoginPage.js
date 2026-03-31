@@ -7,16 +7,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [mounted, setMounted]   = useState(false);
-  const { login, loading, error, setError } = useAuth();
+  const { user, login, loading, error, setError } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    if (user) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
     try {
-      const user = await login(email, password);
-      navigate('/dashboard');
+      await login(email, password);
+      navigate('/dashboard', { replace: true });
     } catch {}
   };
 
@@ -507,7 +513,9 @@ export default function LoginPage() {
                 </div>
                 <div className="field-footer">
                   <span/>
-                  <a href="#" className="forgot">Forgot password?</a>
+                  <button type="button" className="forgot" onClick={() => {}}>
+                    Forgot password?
+                  </button>
                 </div>
               </div>
 

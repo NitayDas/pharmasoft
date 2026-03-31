@@ -1,7 +1,7 @@
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -15,8 +15,8 @@ class LoginView(TokenObtainPairView):
 
 
 class RegisterView(APIView):
-    """Register a new user (admin only in production; open for demo)."""
-    permission_classes = [AllowAny]
+    """Register a new user. Only admin/superusers may create users."""
+    permission_classes = [IsAdminUser]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
