@@ -8,17 +8,17 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
 
-  const login = async (email, password) => {
+  const login = async (username, password) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await authService.login(email, password);
+      const data = await authService.login(username, password);
       setUser(data.user);
       return data.user;
     } catch (err) {
       const msg = err.response?.data?.detail
         || err.response?.data?.non_field_errors?.[0]
-        || 'Invalid email or password.';
+        || 'Invalid username or password.';
       setError(msg);
       throw err;
     } finally {

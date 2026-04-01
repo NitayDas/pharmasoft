@@ -36,8 +36,8 @@ api.interceptors.response.use(
 
 // ─── Auth helpers ─────────────────────────────────────────────
 export const authService = {
-  async login(email, password) {
-    const { data } = await api.post('/login/', { email, password });
+  async login(username, password) {
+    const { data } = await api.post('/login/', { username, password });
     localStorage.setItem('access_token', data.access);
     localStorage.setItem('refresh_token', data.refresh);
     localStorage.setItem('user', JSON.stringify(data.user));
@@ -52,11 +52,6 @@ export const authService = {
 
   async getProfile() {
     const { data } = await api.get('/me/');
-    return data;
-  },
-
-  async register(payload) {
-    const { data } = await api.post('/register/', payload);
     return data;
   },
 
