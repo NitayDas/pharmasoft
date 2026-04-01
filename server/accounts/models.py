@@ -4,17 +4,16 @@ from django.db import models
 
 class User(AbstractUser):
     ROLE_CHOICES = [
-        ('admin', 'Admin'),
-        ('pharmacist', 'Pharmacist'),
-        ('cashier', 'Cashier'),
+        ('employee', 'Employee'),
+        ('user', 'User'),
     ]
     email = models.EmailField(unique=True)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='cashier')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='employee')
     phone = models.CharField(max_length=15, blank=True)
     is_active = models.BooleanField(default=True)
 
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = ['email']
 
     def __str__(self):
-        return f"{self.email} ({self.role})"
+        return f"{self.username} ({self.role})"

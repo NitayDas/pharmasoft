@@ -25,9 +25,10 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',  # required for logout blacklisting
     'corsheaders',
     'accounts',
+    'sales',
 ]
 
-AUTH_USER_MODEL = 'accounts.User'  # custom user model with email login
+AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',

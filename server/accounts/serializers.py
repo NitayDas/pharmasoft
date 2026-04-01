@@ -38,3 +38,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+
+    def validate_role(self, value):
+        allowed_roles = {choice[0] for choice in User.ROLE_CHOICES}
+        if value not in allowed_roles:
+            raise serializers.ValidationError('Role must be employee or user.')
+        return value
