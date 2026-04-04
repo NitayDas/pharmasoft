@@ -27,6 +27,14 @@ export default function SalesPage() {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomerPhone, setSelectedCustomerPhone] = useState('');
+  const [showCustomerTable, setShowCustomerTable] = useState(false);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
+  const [savingCustomer, setSavingCustomer] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -50,9 +58,15 @@ export default function SalesPage() {
             discountPercent: '0',
           });
         }
-      } catch {
+      } catch (error) {
         if (active) {
-          setErrorMessage('Unable to load products from the database.');
+          if (!error.response) {
+            setErrorMessage('Backend server is not running. Start Django at http://localhost:8000 and reload.');
+          } else if (error.response.status === 401) {
+            setErrorMessage('Your session expired. Please sign in again.');
+          } else {
+            setErrorMessage('Unable to load products from the database.');
+          }
         }
       } finally {
         if (active) {
@@ -61,7 +75,24 @@ export default function SalesPage() {
       }
     };
 
+    const loadCustomers = async () => {
+      try {
+        const data = await salesService.getCustomers();
+        if (!active) return;
+        setCustomers(data);
+      } catch {
+        if (active) {
+          setStatusMessage('Could not load saved customers right now.');
+        }
+      } finally {
+        if (active) {
+          setLoadingCustomers(false);
+        }
+      }
+    };
+
     loadProducts();
+    loadCustomers();
 
     return () => {
       active = false;
@@ -148,6 +179,112 @@ export default function SalesPage() {
     setSaleItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const handleEditItem = (item) => {
+    setDraftItem({
+      productId: String(item.productId),
+      itemName: item.name,
+      batch: item.batch,
+      unit: item.unit,
+      qty: String(item.qty),
+      unitPrice: String(item.unitPrice),
+      discountPercent: String(item.discountPercent),
+    });
+    setEditingItemId(item.id);
+  };
+
+  const handleSaveEdit = () => {
+    if (!draftItem.productId) return;
+
+    const qty = Number(draftItem.qty);
+    const unitPrice = Number(draftItem.unitPrice);
+    const discountPercent = Number(draftItem.discountPercent || 0);
+
+    if (
+      qty <= 0 ||
+      unitPrice <= 0 ||
+      discountPercent < 0 ||
+      discountPercent > 100 ||
+      Number.isNaN(qty) ||
+      Number.isNaN(unitPrice) ||
+      Number.isNaN(discountPercent)
+    ) {
+      return;
+    }
+
+    const selectedProduct = products.find((product) => String(product.id) === draftItem.productId);
+    if (!selectedProduct) return;
+
+    setSaleItems((prev) =>
+      prev.map((item) =>
+        item.id === editingItemId
+          ? {
+            ...item,
+            productId: selectedProduct.id,
+            name: draftItem.itemName.trim(),
+            batch: draftItem.batch.trim(),
+            unit: draftItem.unit || selectedProduct.unit || 'Box',
+            qty,
+            unitPrice,
+            discountPercent,
+          }
+          : item
+      )
+    );
+
+    setEditingItemId(null);
+    setDraftItem(emptyDraft);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingItemId(null);
+    setDraftItem(emptyDraft);
+  };
+
+  const handleSelectSavedCustomer = (phone) => {
+    setSelectedCustomerPhone(phone);
+    if (!phone) {
+      setCustomerName('');
+      setCustomerPhone('');
+      return;
+    }
+
+    const selected = customers.find((customer) => customer.phone === phone);
+    if (!selected) return;
+
+    setCustomerName(selected.name || '');
+    setCustomerPhone(selected.phone || '');
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!customerName.trim() || !customerPhone.trim()) {
+      setErrorMessage('Customer name and phone are required to save customer.');
+      return;
+    }
+
+    setSavingCustomer(true);
+    setErrorMessage('');
+    setStatusMessage('');
+
+    try {
+      await salesService.createCustomer({
+        name: customerName.trim(),
+        phone: customerPhone.trim(),
+      });
+
+      const updatedCustomers = await salesService.getCustomers();
+      setCustomers(updatedCustomers);
+      setSelectedCustomerPhone(customerPhone.trim());
+      setStatusMessage('Customer saved successfully.');
+    } catch (error) {
+      const message = error.response?.data?.phone?.[0]
+        || error.response?.data?.detail
+        || 'Unable to save customer. Please try again.';
+      setErrorMessage(message);
+    } finally {
+      setSavingCustomer(false);
+    }
+  };
+
   const handleSaveSale = async () => {
     if (!saleItems.length) {
       setErrorMessage('Add at least one item before saving the sale.');
@@ -160,8 +297,8 @@ export default function SalesPage() {
 
     try {
       const payload = {
-        customer_name: 'Walk-in Customer',
-        contact_number: '',
+        customer_name: customerName.trim() || 'Walk-in Customer',
+        contact_number: customerPhone.trim(),
         sale_date: new Date().toISOString().slice(0, 10),
         served_by: user.id,
         payment_method: paymentMethod,
@@ -179,7 +316,14 @@ export default function SalesPage() {
 
       await salesService.createSale(payload);
       setSaleItems([]);
+      setCustomerName('');
+      setCustomerPhone('');
+      setSelectedCustomerPhone('');
       setStatusMessage('Sale saved successfully.');
+
+      // Refresh customer list to show updated totals
+      const updatedCustomers = await salesService.getCustomers();
+      setCustomers(updatedCustomers);
     } catch (error) {
       const message = error.response?.data?.items?.[0]
         || error.response?.data?.detail
@@ -222,29 +366,93 @@ export default function SalesPage() {
 
             <div className="sp-form-grid">
               <label className="sp-field">
-                <span>Customer Name</span>
-                <input type="text" defaultValue="Walk-in Customer" />
+                <span>Saved Customers</span>
+                <select
+                  value={selectedCustomerPhone}
+                  onChange={(e) => handleSelectSavedCustomer(e.target.value)}
+                  disabled={loadingCustomers}
+                >
+                  <option value="">{loadingCustomers ? 'Loading customers...' : 'Select saved customer'}</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.phone}>
+                      {customer.name} ({customer.phone})
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="sp-field">
-                <span>Contact Number</span>
-                <input type="text" defaultValue="01XXXXXXXXX" />
+                <span>Customer Name <span className="sp-optional">(Optional)</span></span>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                />
+              </label>
+              <label className="sp-field">
+                <span>Contact Number <span className="sp-optional">(Optional)</span></span>
+                <input
+                  type="text"
+                  placeholder="01XXXXXXXXX"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                />
               </label>
               <label className="sp-field">
                 <span>Sale Date</span>
-                <input type="text" defaultValue="02 Apr 2026" />
+                <input type="text" value={new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} readOnly />
               </label>
               <label className="sp-field">
                 <span>Served By</span>
-                <input type="text" defaultValue={user?.username || 'admin'} />
+                <input type="text" value={user?.username || 'admin'} readOnly />
               </label>
+              <button
+                type="button"
+                className="sp-btn sp-btn-secondary"
+                onClick={handleSaveCustomer}
+                disabled={savingCustomer || !customerName.trim() || !customerPhone.trim()}
+              >
+                {savingCustomer ? 'Saving Customer...' : 'Save Customer for Future'}
+              </button>
+              <button
+                type="button"
+                className="sp-btn sp-btn-muted"
+                onClick={() => setShowCustomerTable((prev) => !prev)}
+              >
+                {showCustomerTable ? 'Hide Customer Table' : 'View Customer Table'}
+              </button>
             </div>
 
+            {showCustomerTable ? (
+              <div className="sp-customer-table-wrap">
+                <div className="sp-customer-table sp-customer-table-head">
+                  <div>Name</div>
+                  <div>Phone</div>
+                  <div>Medicine History</div>
+                  <div>Total Purchase</div>
+                  <div>Total Due</div>
+                </div>
+                {customers.length ? (
+                  customers.map((customer) => (
+                    <div key={customer.id} className="sp-customer-table sp-customer-table-row">
+                      <div className="is-strong">{customer.name}</div>
+                      <div>{customer.phone}</div>
+                      <div>{customer.medicine_history || '-'}</div>
+                      <div>{money(Number(customer.total_purchase_amount || 0))}</div>
+                      <div>{money(Number(customer.total_due_amount || 0))}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="sp-help-text">No customers saved yet.</div>
+                )}
+              </div>
+            ) : null}
+
             <div className="sp-add-item">
-              <h3 className="sp-subtitle">Add Item</h3>
+              <h3 className="sp-subtitle">{editingItemId ? 'Edit Item' : 'Add Item'}</h3>
               {loadingProducts ? <div className="sp-help-text">Loading product catalog...</div> : null}
               <div className="sp-add-grid">
                 <label className="sp-field">
-                  <span>Product</span>
+                  <span>Product <span className="sp-required">(Required)</span></span>
                   <select
                     value={draftItem.productId}
                     onChange={(e) => handleProductChange(e.target.value)}
@@ -260,7 +468,7 @@ export default function SalesPage() {
                   </select>
                 </label>
                 <label className="sp-field">
-                  <span>Item Name</span>
+                  <span>Item Name <span className="sp-optional">(Optional)</span></span>
                   <input
                     type="text"
                     value={draftItem.itemName}
@@ -268,7 +476,7 @@ export default function SalesPage() {
                   />
                 </label>
                 <label className="sp-field">
-                  <span>Batch</span>
+                  <span>Batch <span className="sp-optional">(Optional)</span></span>
                   <input
                     type="text"
                     value={draftItem.batch}
@@ -276,7 +484,7 @@ export default function SalesPage() {
                   />
                 </label>
                 <label className="sp-field">
-                  <span>Qty</span>
+                  <span>Qty <span className="sp-required">(Required)</span></span>
                   <input
                     type="number"
                     min="1"
@@ -285,7 +493,7 @@ export default function SalesPage() {
                   />
                 </label>
                 <label className="sp-field">
-                  <span>Unit Price</span>
+                  <span>Unit Price <span className="sp-required">(Required)</span></span>
                   <input
                     type="number"
                     min="0"
@@ -294,7 +502,7 @@ export default function SalesPage() {
                   />
                 </label>
                 <label className="sp-field">
-                  <span>Discount (%)</span>
+                  <span>Discount (%) <span className="sp-optional">(Optional)</span></span>
                   <input
                     type="number"
                     min="0"
@@ -305,9 +513,20 @@ export default function SalesPage() {
                   />
                 </label>
                 <div className="sp-add-actions">
-                  <button type="button" className="sp-btn sp-btn-primary" onClick={handleAddItem}>
-                    Add Item
-                  </button>
+                  {editingItemId ? (
+                    <>
+                      <button type="button" className="sp-btn sp-btn-primary" onClick={handleSaveEdit}>
+                        Save Changes
+                      </button>
+                      <button type="button" className="sp-btn sp-btn-muted" onClick={handleCancelEdit}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="sp-btn sp-btn-primary" onClick={handleAddItem}>
+                      Add Item
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -339,7 +558,14 @@ export default function SalesPage() {
                     <div>{money(item.unitPrice)}</div>
                     <div>{item.discountPercent}%</div>
                     <div className="is-strong">{money(net)}</div>
-                    <div>
+                    <div className="sp-item-actions">
+                      <button
+                        type="button"
+                        className="sp-edit-btn"
+                        onClick={() => handleEditItem(item)}
+                      >
+                        Edit
+                      </button>
                       <button
                         type="button"
                         className="sp-remove-btn"
@@ -411,9 +637,11 @@ export default function SalesPage() {
                 <h2>Actions</h2>
               </div>
               <div className="sp-actions">
-                <button type="button" className="sp-btn sp-btn-primary">Finalize Sale</button>
-                <button type="button" className="sp-btn sp-btn-muted">Print Invoice</button>
-                <button type="button" className="sp-btn sp-btn-muted">Hold Bill</button>
+                <button type="button" className="sp-btn sp-btn-primary" onClick={handleSaveSale} disabled={saving}>
+                  {saving ? 'Finalizing...' : 'Finalize Sale'}
+                </button>
+                <button type="button" className="sp-btn sp-btn-muted" disabled>Print Invoice</button>
+                <button type="button" className="sp-btn sp-btn-muted" disabled>Hold Bill</button>
               </div>
             </div>
           </aside>
