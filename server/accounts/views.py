@@ -48,7 +48,7 @@ class LogoutView(APIView):
             return Response({'error': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class MeView(APIView):
+class UserView(APIView):
     """Return the current authenticated user's profile."""
     permission_classes = [IsAuthenticated]
 

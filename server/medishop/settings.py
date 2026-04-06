@@ -11,7 +11,13 @@ SECRET_KEY = 'django-insecure-medishop-secret-key-change-in-production-xyz123'
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    "starmedicaljsr.com.bd",
+    "www.starmedicaljsr.com.bd",
+    "localhost",
+    "127.0.0.1",
+    "162.0.209.212",
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -80,8 +86,20 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# static files (CSS, JavaScript, Images)
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STATICFILES_DIRS = [
+    BASE_DIR / "static", 
+]
+
+
+# MEDIA FILES
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # ─── REST Framework ───────────────────────────────────────────
 REST_FRAMEWORK = {
@@ -95,8 +113,8 @@ REST_FRAMEWORK = {
 
 # ─── JWT Settings ─────────────────────────────────────────────
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'ALGORITHM': 'HS256',
@@ -108,7 +126,21 @@ SIMPLE_JWT = {
 
 # ─── CORS Settings ────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://starmedicaljsr.com.bd",
+    "http://starmedicaljsr.com.bd",
+    "https://www.starmedicaljsr.com.bd",
+    "http://www.starmedicaljsr.com.bd",
 ]
+
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1",
+    "https://starmedicaljsr.com.bd",
+    "http://starmedicaljsr.com.bd",
+    "https://www.starmedicaljsr.com.bd",
+    "http://www.starmedicaljsr.com.bd",
+]
