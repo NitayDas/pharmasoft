@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import Select from "react-select";
 import AxiosInstance from "../../components/AxiosInstance";
 import { toast } from "react-hot-toast";
-import salesService from "../../Services/salesService";
+import salesService from "../../services/salesService";
 
 export default function CustomerProductSale() {
   // ---------- Custom Select Styles ----------

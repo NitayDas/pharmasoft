@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserProvider, useUser } from '../../Provider/UserProvider';
-import salesService from '../../Services/salesService';
+import salesService from '../../services/salesService';
 import './DashboardPage.css';
 
 const KPI_LABELS = [
