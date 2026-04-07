@@ -1,9 +1,9 @@
-import exclusive from "../../assets/categories/exclusive.png";
-import women from "../../assets/categories/women.png";
-import wellness from "../../assets/categories/wellness.png";
-import cream from "../../assets/categories/cream.png";
-import personal from "../../assets/categories/personal.png";
-import skin from "../../assets/categories/skin.png";
+import exclusive from "../../assets/categories/exclusive.PNG";
+import women from "../../assets/categories/women.PNG";
+import wellness from "../../assets/categories/wellness.PNG";
+import cream from "../../assets/categories/cream.PNG";
+import personal from "../../assets/categories/personal.PNG";
+import skin from "../../assets/categories/skin.PNG";
 
 const categories = [
   { id: 1, name: "Exclusive Deals", image: exclusive },
