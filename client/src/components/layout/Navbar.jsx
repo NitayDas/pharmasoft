@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 export default function Navbar() {
   const location = useLocation();
-  const { user, signOut } = useUser();
+  const { user, logout } = useUser();
   const navigate = useNavigate();
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -60,7 +60,7 @@ export default function Navbar() {
               <button
                 className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-red-600"
                 onClick={() => {
-                  signOut();
+                  logout();
                   window.location.href = "/";
                 }}
               >

@@ -85,7 +85,7 @@ export const UserProvider = ({ children }) => {
   // =========================
   const logout = async () => {
     try {
-      await AxiosInstance.post("/api/auth/logout/");
+      await AxiosInstance.post("auth/logout/");
     } catch (err) {
       console.error(err);
     }
