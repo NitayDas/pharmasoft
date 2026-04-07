@@ -16,7 +16,7 @@ ALLOWED_HOSTS = [
     "www.starmedicaljsr.com.bd",
     "localhost",
     "127.0.0.1",
-    "162.0.209.212",
+    "36.50.41.173",
 ]
 
 INSTALLED_APPS = [
