@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserProvider, useUser } from '../../Provider/UserProvider';
+import { useUser } from '../../Provider/UserProvider';
 import salesService from '../../Services/salesService';
 import './DashboardPage.css';
 
