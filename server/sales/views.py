@@ -88,6 +88,11 @@ class ProductDetailView(APIView):
 class SaleCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        sales = Sale.objects.prefetch_related('items').select_related('served_by', 'customer').all().order_by('-created_at')
+        serializer = SaleSerializer(sales, many=True)
+        return Response(serializer.data)
+
     def post(self, request):
         serializer = SaleCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

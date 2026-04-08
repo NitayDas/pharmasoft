@@ -47,6 +47,11 @@ export const salesService = {
     return data;
   },
 
+  async getInvoices() {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/invoices/`);
+    return data;
+  },
+
   async getCustomers() {
     const { data } = await AxiosInstance.get(`${SALES_BASE}/customers/`);
     return data;

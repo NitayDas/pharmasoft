@@ -5,6 +5,12 @@ import { toast } from "react-hot-toast";
 import salesService from "../../services/salesService";
 import { useUser } from "../../Provider/UserProvider";
 
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "cash", label: "Cash" },
+  { value: "card", label: "Card" },
+  { value: "mobile_banking", label: "Mobile Banking" },
+];
+
 export default function CustomerProductSale() {
   const { user } = useUser();
   // ---------- Custom Select Styles ----------
@@ -138,17 +144,8 @@ export default function CustomerProductSale() {
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   // ---------- Payment State ----------
-  const [paymentModes, setPaymentModes] = useState([]);
-  const [banks, setBanks] = useState([]);
-  const [paymentData, setPaymentData] = useState({
-    paymentMode: "", // id of payment mode
-    bankName: "",
-    accountNo: "",
-    chequeNo: "",
-    paidAmount: "",
-  });
-  const [payments, setPayments] = useState([]);
-  const [totalPaidAmount, setTotalPaidAmount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentNote, setPaymentNote] = useState("");
   const [editing, setEditing] = useState(false);
   const query = new URLSearchParams(location.search);
   const editSaleId = query.get("edit");
@@ -184,36 +181,6 @@ export default function CustomerProductSale() {
     fetchCustomerInfo();
     }, []);
 
-
-  // ---------- Fetch payment modes & banks ----------
-  useEffect(() => {
-    const fetchPaymentData = async () => {
-      try {
-        const [pmRes, bankRes] = await Promise.all([
-          AxiosInstance.get("payment-mode/"),
-          AxiosInstance.get("banks/"),
-        ]);
-        setPaymentModes(
-          pmRes.data.map((pm) => ({
-            value: pm.id,
-            label: pm.name,
-          }))
-        );
-        setBanks(
-          bankRes.data.map((bank) => ({
-            value: bank.id,
-            label: bank.name,
-          }))
-        );
-      } catch (err) {
-        console.error(err);
-        toast.error("Failed to load payment data");
-      }
-    };
-    fetchPaymentData();
-  }, []);
-
-
  useEffect(() => {
   if (!editSaleId) return;
 
@@ -242,24 +209,12 @@ export default function CustomerProductSale() {
         }))
       );
 
-      // ---------- Payments ----------
-      setPayments(
-        sale.payments.map(p => ({
-          paymentMode: p.payment_mode?.id || "",
-          bankName: p.bank?.id || "",
-          paidAmount: parseFloat(p.paid_amount || 0),
-          remarks: p.remarks || "",
-        }))
-      );
-
       // ---------- Totals ----------
       setTotalAmount(parseFloat(sale.total_amount || 0));
-      setServiceCharge(parseFloat(sale.service_charge || 0));
       setDiscountAmount(parseFloat(sale.discount_amount || 0));
       setTotalPayableAmount(parseFloat(sale.total_payable_amount || 0));
-      setTotalPaidAmount(
-        sale.payments.reduce((acc, p) => acc + parseFloat(p.paid_amount || 0), 0)
-      );
+      setPaymentMethod(sale.payment_method || "cash");
+      setPaymentNote(sale.notes || "");
 
       // ---------- Sale Date ----------
       setSaleDate(sale.sale_date || new Date().toISOString().split("T")[0]);
@@ -488,49 +443,6 @@ export default function CustomerProductSale() {
     setTotalPayableAmount(payable > 0 ? payable : 0);
   }, [addedProducts, discountAmount]);
 
-  // ---------- Payment handlers ----------
-  const handlePaymentChange = (name, value) => {
-    setPaymentData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleAddPayment = () => {
-    if (!paymentData.paymentMode || !paymentData.paidAmount) {
-      toast.error("Payment Mode and Paid Amount are required");
-      return;
-    }
-
-    setPayments((prev) => [...prev, paymentData]);
-    setPaymentData({
-      paymentMode: "",
-      bankName: "",
-      accountNo: "",
-      chequeNo: "",
-      paidAmount: "",
-      remarks: "",
-    });
-  };
-
-  const handleRemovePayment = (index) => {
-    setPayments((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  // Total paid amount
-  useEffect(() => {
-    const total = payments.reduce(
-      (sum, payment) => sum + parseFloat(payment.paidAmount || 0),
-      0
-    );
-    setTotalPaidAmount(total);
-  }, [payments]);
-
-  const selectedPaymentModeObj = paymentModes.find(
-    (pm) => pm.value === paymentData.paymentMode
-  );
-  const selectedPaymentModeLabel = selectedPaymentModeObj?.label;
-
-  const isCheque = selectedPaymentModeLabel === "Cheque";
-  const isBank = selectedPaymentModeLabel === "Bank";
-
   // ---------- Submit sale ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -564,23 +476,13 @@ export default function CustomerProductSale() {
         return;
       }
 
-      const paymentMethodLabel = (selectedPaymentModeLabel || "").toLowerCase();
-      const paymentMethod = paymentMethodLabel.includes("card")
-        ? "card"
-        : paymentMethodLabel.includes("mobile") ||
-          paymentMethodLabel.includes("bkash") ||
-          paymentMethodLabel.includes("nagad") ||
-          paymentMethodLabel.includes("rocket")
-        ? "mobile_banking"
-        : "cash";
-
       const payload = {
         customer_name: selectedCustomer.customer_name || customerData.customer_name || "Walk-in Customer",
         contact_number: selectedCustomer.phone1 || customerData.phone1 || "",
         sale_date: saleDate,
         served_by: user.id,
         payment_method: paymentMethod,
-        notes: "",
+        notes: paymentNote,
         items: addedProducts.map((product) => {
           const latestProduct = productList.find((item) => item.id === product.id);
           return {
@@ -640,16 +542,8 @@ export default function CustomerProductSale() {
     setAddedProducts([]);
     setTotalAmount(0);
     setTotalPayableAmount(0);
-    setPayments([]);
-    setTotalPaidAmount(0);
-    setPaymentData({
-      paymentMode: "",
-      bankName: "",
-      accountNo: "",
-      chequeNo: "",
-      paidAmount: "",
-      remarks: "",
-    });
+    setPaymentMethod("cash");
+    setPaymentNote("");
     setBasePrice("");
     setPrice("");
     setPercentage("");
@@ -743,7 +637,7 @@ export default function CustomerProductSale() {
                 Paid
               </div>
               <div className="mt-1 text-lg font-semibold text-slate-900">
-                {formatCurrency(totalPaidAmount)}
+                {formatCurrency(totalPayableAmount)}
               </div>
             </div>
           </div>
@@ -1127,31 +1021,22 @@ export default function CustomerProductSale() {
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
             <div className="mb-4">
               <h2 className="text-lg font-semibold text-slate-900">
-                Payment Collection
+                Payment Method
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Capture payment details and compare them against the invoice total instantly.
+                Choose how the sale is paid and keep a short internal note with the invoice.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="md:col-span-2">
+            <div className="grid grid-cols-1 gap-4">
+              <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Payment Mode
                 </label>
                 <Select
-                  options={paymentModes}
-                  value={
-                    paymentModes.find(
-                      (pm) => pm.value === paymentData.paymentMode
-                    ) || null
-                  }
-                  onChange={(selected) =>
-                    handlePaymentChange(
-                      "paymentMode",
-                      selected ? selected.value : ""
-                    )
-                  }
+                  options={PAYMENT_METHOD_OPTIONS}
+                  value={PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod) || null}
+                  onChange={(selected) => setPaymentMethod(selected?.value || "cash")}
                   placeholder="Select payment mode"
                   className="text-sm"
                   styles={customSelectStyles}
@@ -1159,165 +1044,41 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Bank Name
-                </label>
-                <Select
-                  options={banks}
-                  value={
-                    banks.find((opt) => opt.value === paymentData.bankName) || null
-                  }
-                  onChange={(selected) =>
-                    handlePaymentChange("bankName", selected ? selected.value : "")
-                  }
-                  placeholder="Select bank"
-                  isClearable
-                  isDisabled={!isBank}
-                  className="text-sm"
-                  styles={customSelectStyles}
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Account No
+                  Internal Note
                 </label>
-                <input
-                  type="text"
-                  value={paymentData.accountNo}
-                  onChange={(e) =>
-                    handlePaymentChange("accountNo", e.target.value)
-                  }
-                  disabled={!isBank}
-                  className={`w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition ${
-                    !isBank
-                      ? "bg-slate-50 text-slate-400"
-                      : "bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  }`}
-                  placeholder="Account No"
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Cheque No
-                </label>
-                <input
-                  type="text"
-                  value={paymentData.chequeNo}
-                  onChange={(e) =>
-                    handlePaymentChange("chequeNo", e.target.value)
-                  }
-                  disabled={!isCheque}
-                  className={`w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition ${
-                    !isCheque
-                      ? "bg-slate-50 text-slate-400"
-                      : "bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  }`}
-                  placeholder="Cheque No"
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Paid Amount
-                </label>
-                <input
-                  type="number"
-                  value={paymentData.paidAmount}
-                  onChange={(e) =>
-                    handlePaymentChange("paidAmount", e.target.value)
-                  }
+                <textarea
+                  value={paymentNote}
+                  onChange={(e) => setPaymentNote(e.target.value)}
+                  rows={4}
                   className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  placeholder="0.00"
-                  onKeyDown={handleKeyDown}
+                  placeholder="Optional note for this sale"
                 />
               </div>
             </div>
 
-            <div className="mt-5 flex justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+            <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-4">
               <div>
                 <div className="text-xs uppercase tracking-wide text-slate-400">
-                  Total Paid
+                  Payment Summary
                 </div>
-                <div className="mt-1 text-lg font-semibold text-slate-900">
-                  {formatCurrency(totalPaidAmount)}
+                <div className="mt-2 space-y-2 text-sm text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span>Selected method</span>
+                    <span className="font-medium text-slate-900">
+                      {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Recorded as paid</span>
+                    <span className="font-semibold text-emerald-700">
+                      {formatCurrency(totalPayableAmount)}
+                    </span>
+                  </div>
                 </div>
               </div>
-
-              <button
-                className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-100"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleAddPayment();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddPayment();
-                  }
-                }}
-              >
-                Add Payment
-              </button>
             </div>
-
-            {payments.length > 0 && (
-              <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-sm">
-                    <thead className="bg-slate-50">
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                        <th className="px-4 py-3 font-medium">Mode</th>
-                        <th className="px-4 py-3 font-medium">Bank</th>
-                        <th className="px-4 py-3 font-medium">Account</th>
-                        <th className="px-4 py-3 font-medium">Cheque</th>
-                        <th className="px-4 py-3 text-right font-medium">Paid</th>
-                        <th className="px-4 py-3 text-right font-medium">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {payments.map((pay, idx) => {
-                        const modeLabel =
-                          paymentModes.find((mode) => mode.value === pay.paymentMode)
-                            ?.label || "N/A";
-                        const bankLabel =
-                          banks.find((bank) => bank.value === pay.bankName)?.label ||
-                          "N/A";
-
-                        return (
-                          <tr key={idx}>
-                            <td className="px-4 py-3 text-slate-700">{modeLabel}</td>
-                            <td className="px-4 py-3 text-slate-700">{bankLabel}</td>
-                            <td className="px-4 py-3 text-slate-600">{pay.accountNo || "-"}</td>
-                            <td className="px-4 py-3 text-slate-600">{pay.chequeNo || "-"}</td>
-                            <td className="px-4 py-3 text-right font-medium text-slate-900">
-                              {formatCurrency(pay.paidAmount)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemovePayment(idx)}
-                                  className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         </section>
       </div>
