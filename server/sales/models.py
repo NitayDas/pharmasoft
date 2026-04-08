@@ -8,7 +8,6 @@ class Product(models.Model):
     batch = models.CharField(max_length=64, blank=True)
     unit = models.CharField(max_length=32, default='Box')
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
-    stock_quantity = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -20,6 +19,37 @@ class Product(models.Model):
         return self.name
 
 
+class Stock(models.Model):
+    product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name='stock')
+    quantity = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['product__name']
+
+    def __str__(self):
+        return f'{self.product.name} stock ({self.quantity})'
+
+
+class Customer(models.Model):
+    """Customer database for tracking purchase history and due amounts."""
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=32, unique=True)
+    email = models.EmailField(blank=True)
+    address = models.TextField(blank=True)
+    total_purchase_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_due_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    medicine_history = models.TextField(blank=True, help_text='Medicine history and notes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} ({self.phone})'
+
+
 class Sale(models.Model):
     PAYMENT_METHOD_CHOICES = [
         ('cash', 'Cash'),
@@ -28,6 +58,7 @@ class Sale(models.Model):
     ]
 
     sale_no = models.CharField(max_length=32, unique=True)
+    customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')
     customer_name = models.CharField(max_length=255)
     contact_number = models.CharField(max_length=32, blank=True)
     sale_date = models.DateField()

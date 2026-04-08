@@ -1,57 +1,60 @@
-import { useEffect, useState } from "react";
-import {
-  FaSearch,
-  FaPlus,
-  FaUser,
-  FaPhoneAlt,
-  FaTrash,
-  FaEdit,
-} from "react-icons/fa";
-import AxiosInstance from "../../components/AxiosInstance";
+import { useEffect, useMemo, useState } from "react";
+import { FaEdit, FaPhoneAlt, FaPlus, FaSearch, FaTrash } from "react-icons/fa";
+import { toast } from "react-hot-toast";
+
+import salesService from "../../services/salesService";
+
+const EMPTY_FORM = {
+  customer_name: "",
+  phone1: "",
+  email: "",
+  address: "",
+  previous_due_amount: "",
+};
+
+const formatCurrency = (value) =>
+  `৳ ${Number(value || 0).toLocaleString("en-BD", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 export default function Customers() {
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(true);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
-  
-  // edit mode
   const [editingId, setEditingId] = useState(null);
+  const [customerToDelete, setCustomerToDelete] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const getEmptyForm = () => ({
-    customer_name: "",
-    phone1: "",
-    address: "",
-    previous_due_amount: "",
-  });
+  const filteredCustomers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return customers;
 
-  const [form, setForm] = useState(() => getEmptyForm());
+    return customers.filter((customer) =>
+      [customer.customer_name, customer.phone1, customer.email]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [customers, search]);
 
   const resetFormState = () => {
-    setForm(getEmptyForm());
+    setForm(EMPTY_FORM);
     setEditingId(null);
   };
 
-  // -------- API calls --------
   const fetchCustomers = async (searchValue = "") => {
     try {
       setLoading(true);
       setError("");
-
-      if (searchValue.trim()) params.search = searchValue.trim();
-
-      const res = await AxiosInstance.get("customers/");
-      const data = res.data;
-      const items = Array.isArray(data) ? data : data.results || [];
-      setCustomers(items);
+      const data = await salesService.searchCustomers(searchValue.trim());
+      setCustomers(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error(err);
       const detail =
-        err.response?.data?.detail ||
-        err.message ||
-        "Failed to fetch customers";
+        err.response?.data?.detail || err.message || "Failed to load customers.";
       setError(detail);
     } finally {
       setLoading(false);
@@ -62,46 +65,56 @@ export default function Customers() {
     fetchCustomers();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      fetchCustomers(search);
+    }, 250);
 
-  // -------- handlers --------
-  const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearch(value);
-    fetchCustomers(value);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const handleFormChange = (event) => {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
   };
 
-  const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setError("");
-
-    const payload = {
-      ...form,
-      previous_due_amount:
-        form.previous_due_amount === "" ? null : form.previous_due_amount
-    };
+  const handleSubmit = async (event) => {
+    event.preventDefault();
 
     try {
+      setSaving(true);
+      setError("");
+
+      const payload = {
+        customer_name: form.customer_name.trim(),
+        phone1: form.phone1.trim(),
+        email: form.email.trim(),
+        address: form.address.trim(),
+        previous_due_amount:
+          form.previous_due_amount === "" ? "0.00" : form.previous_due_amount,
+      };
+
       if (editingId) {
-        await AxiosInstance.patch(`customers/${editingId}/`, payload);
+        await salesService.updateCustomer(editingId, payload);
+        toast.success("Customer updated successfully.");
       } else {
-        await AxiosInstance.post("customers/", payload);
+        await salesService.createCustomer(payload);
+        toast.success("Customer added successfully.");
       }
 
       resetFormState();
       setShowForm(false);
-      fetchCustomers(search);
+      await fetchCustomers(search);
     } catch (err) {
-      console.error(err);
+      const data = err.response?.data;
       const detail =
-        err.response?.data?.detail ||
-        err.message ||
-        "Failed to save customer";
+        data?.detail ||
+        (data && typeof data === "object"
+          ? Object.entries(data)
+              .map(([field, messages]) => `${field}: ${[].concat(messages).join(" ")}`)
+              .join(" ")
+          : err.message) ||
+        "Failed to save customer.";
       setError(detail);
     } finally {
       setSaving(false);
@@ -111,306 +124,350 @@ export default function Customers() {
   const handleEdit = (customer) => {
     setEditingId(customer.id);
     setShowForm(true);
-
+    setError("");
     setForm({
       customer_name: customer.customer_name || "",
       phone1: customer.phone1 || "",
+      email: customer.email || "",
       address: customer.address || "",
       previous_due_amount: customer.previous_due_amount || "",
     });
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this customer?")) {
-      return;
-    }
+  const openDeleteConfirmation = (customer) => {
+    setCustomerToDelete(customer);
+    setError("");
+  };
+
+  const closeDeleteConfirmation = () => {
+    if (deleting) return;
+    setCustomerToDelete(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!customerToDelete) return;
+
     try {
-      await AxiosInstance.delete(`customers/${id}/`);
-      setCustomers((prev) => prev.filter((c) => c.id !== id));
+      setDeleting(true);
+      setError("");
+      await salesService.deleteCustomer(customerToDelete.id);
+      setCustomers((current) =>
+        current.filter((item) => item.id !== customerToDelete.id)
+      );
+      toast.success("Customer deleted successfully.");
+      if (editingId === customerToDelete.id) {
+        resetFormState();
+      }
+      setCustomerToDelete(null);
     } catch (err) {
-      console.error(err);
       const detail =
-        err.response?.data?.detail ||
-        err.message ||
-        "Failed to delete customer";
+        err.response?.data?.detail || err.message || "Failed to delete customer.";
       setError(detail);
+    } finally {
+      setDeleting(false);
     }
   };
 
-  // -------- render --------
-
   return (
     <div className="p-4 md:p-6">
-      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-4 md:p-5 space-y-4">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="max-w-6xl mx-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-xl md:text-2xl font-semibold text-slate-800">
-              Sales – Customers
-            </h1>
-            <p className="text-xs md:text-sm text-slate-500">
-              Add and manage your customers in a single view.
+            <h1 className="text-2xl font-semibold text-slate-900">Customer Management</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Create, review, and maintain customer records from one workspace.
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-            <div className="relative w-full sm:w-64 md:w-72">
-              <FaSearch className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative w-full sm:w-72">
+              <FaSearch className="absolute left-3 top-3 text-sm text-slate-400" />
               <input
                 type="text"
                 value={search}
-                onChange={handleSearchChange}
-                placeholder="Search by name, phone, shop..."
-                className="w-full pl-9 pr-3 py-1.5 rounded-full border border-slate-200 text-xs md:text-sm focus:outline-none focus:ring focus:ring-blue-500/30"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by name, phone, or email"
+                className="w-full rounded-full border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
               />
             </div>
+
             <button
               type="button"
               onClick={() => {
                 if (!showForm) resetFormState();
-                setShowForm((prev) => !prev);
+                setShowForm((current) => !current);
               }}
-              className="inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-blue-600 text-white text-xs md:text-sm font-medium hover:bg-blue-700 transition"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
             >
-              <FaPlus className="w-3 h-3" />
+              <FaPlus className="text-xs" />
               {showForm ? "Close Form" : "Add Customer"}
             </button>
           </div>
         </div>
 
-        {/* Error banner */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-xs md:text-sm px-3 py-2 rounded-xl">
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* Main content: list + compact side form */}
-        <div
-          className={`flex flex-col gap-4 ${
-            showForm ? "lg:flex-row lg:items-start" : ""
-          }`}
-        >
-          {/* Customer List */}
-          <div className={`flex-1 ${showForm ? "lg:pr-2" : ""}`}>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-base md:text-lg font-semibold text-slate-800">
-                Customer List
-              </h2>
-              <span className="text-[11px] md:text-xs text-slate-500">
-                {customers.length} customer{customers.length !== 1 ? "s" : ""}
+        <div className={`mt-5 flex flex-col gap-5 ${showForm ? "xl:flex-row" : ""}`}>
+          <section className="min-w-0 flex-1">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-800">Customer List</h2>
+              <span className="text-xs text-slate-500">
+                {filteredCustomers.length} customer
+                {filteredCustomers.length === 1 ? "" : "s"}
               </span>
             </div>
 
             {loading ? (
-              <p className="text-xs md:text-sm text-slate-500">
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
                 Loading customers...
-              </p>
-            ) : customers.length === 0 ? (
-              <p className="text-xs md:text-sm text-slate-500">
-                No customers found.
-              </p>
+              </div>
+            ) : filteredCustomers.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
+                No customers found. Add your first customer from the form.
+              </div>
             ) : (
-              <div className="border border-slate-100 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto max-h-[460px] md:max-h-[520px] scrollbar-thin">
-                  <table className="min-w-full text-xs md:text-sm">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-500 text-[11px] md:text-xs">
-                        <th className="px-3 py-2 text-left">Customer</th>
-                        <th className="px-3 py-2 text-left">Contact</th>
-                        <th className="px-3 py-2 text-right">Prev. Due</th>
-                        <th className="px-3 py-2 text-right">Actions</th>
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50">
+                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-3 font-medium">Customer</th>
+                        <th className="px-4 py-3 font-medium">Contact</th>
+                        <th className="px-4 py-3 font-medium">Address</th>
+                        <th className="px-4 py-3 text-right font-medium">Previous Due</th>
+                        <th className="px-4 py-3 text-right font-medium">Actions</th>
                       </tr>
                     </thead>
-                    <tbody>
-                        return (
-                          <tr key={c.id} className="border-t">
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <div>
-                                  <div className="font-medium text-slate-800 text-xs md:text-sm">
-                                    {c.customer_name}
-                                  </div>
-                                  {c.email && (
-                                    <div className="text-[10px] text-slate-500">
-                                      {c.email}
-                                    </div>
-                                  )}
-                                </div>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {filteredCustomers.map((customer) => (
+                        <tr key={customer.id} className="align-top">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-900">
+                              {customer.customer_name}
+                            </div>
+                            {customer.email && (
+                              <div className="mt-1 text-xs text-slate-500">
+                                {customer.email}
                               </div>
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-2 text-[11px] text-slate-700">
-                                <FaPhoneAlt className="w-3 h-3" />
-                                <span>{c.phone1}</span>
-                              </div>
-                            </td>
-                            
-                            <td className="px-3 py-2 text-[11px]">
-                              {c.district || c.division ? (
-                                <>
-                                  {c.district && <span>{c.district}</span>}
-                                  {c.district && c.division && ", "}
-                                  {c.division && <span>{c.division}</span>}
-                                </>
-                              ) : (
-                                <span className="text-slate-400">—</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-right text-[11px] md:text-sm">
-                              {c.previous_due_amount
-                                ? `৳ ${Number(
-                                    c.previous_due_amount
-                                  ).toLocaleString()}`
-                                : "৳ 0.00"}
-                            </td>
-                            <td className="px-3 py-2 text-right space-x-1 md:space-x-2">
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="inline-flex items-center gap-2 text-slate-700">
+                              <FaPhoneAlt className="text-xs text-slate-400" />
+                              <span>{customer.phone1}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {customer.address || <span className="text-slate-400">Not provided</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-slate-800">
+                            {formatCurrency(customer.previous_due_amount)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-2">
                               <button
-                                onClick={() => handleEdit(c)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-blue-600 text-blue-600 text-[10px] md:text-xs hover:bg-blue-50"
+                                type="button"
+                                onClick={() => handleEdit(customer)}
+                                className="inline-flex items-center gap-2 rounded-full border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50"
                               >
-                                <FaEdit className="w-3 h-3" />
+                                <FaEdit className="text-xs" />
                                 Edit
                               </button>
                               <button
-                                onClick={() => handleDelete(c.id)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-red-600 text-red-600 text-[10px] md:text-xs hover:bg-red-50"
+                                type="button"
+                                onClick={() => openDeleteConfirmation(customer)}
+                                className="inline-flex items-center gap-2 rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50"
                               >
-                                <FaTrash className="w-3 h-3" />
+                                <FaTrash className="text-xs" />
                                 Delete
                               </button>
-                            </td>
-                          </tr>
-                        );
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
               </div>
             )}
-          </div>
+          </section>
 
-          {/* Compact side form */}
           {showForm && (
-            <div className="lg:w-80 xl:w-96 lg:border-l lg:border-slate-200 lg:pl-4">
-              <div className="bg-slate-50/60 lg:bg-transparent rounded-xl lg:rounded-none lg:shadow-none shadow-sm p-3 lg:p-0 sticky lg:top-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-800">
-                    {editingId ? "Edit Customer" : "Add Customer"}
-                  </h3>
+            <aside className="xl:w-[360px] xl:border-l xl:border-slate-200 xl:pl-5">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900">
+                      {editingId ? "Edit Customer" : "Add Customer"}
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Capture clean contact details for sales and follow-up.
+                    </p>
+                  </div>
                   {editingId && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                    <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700">
                       ID: {editingId}
                     </span>
                   )}
                 </div>
 
-                <form
-                  onSubmit={handleSubmit}
-                  className="grid grid-cols-1 gap-2 text-xs"
-                >
-                  {/* Name */}
+                <form onSubmit={handleSubmit} className="space-y-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                      Customer Name *
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Customer Name
                     </label>
                     <input
                       name="customer_name"
                       value={form.customer_name}
                       onChange={handleFormChange}
                       required
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring focus:ring-blue-500/30 bg-slate-50"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     />
                   </div>
 
-                  {/* Phone */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                        Phone 1
-                      </label>
-                      <input
-                        name="phone1"
-                        value={form.phone1}
-                        onChange={handleFormChange}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] focus:outline-none focus:ring focus:ring-blue-500/30 bg-slate-50"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Email / DOB */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                        Email
-                      </label>
-                      <input
-                        type="email"
-                        name="email"
-                        value={form.email}
-                        onChange={handleFormChange}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] focus:outline-none focus:ring focus:ring-blue-500/30"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Due */}
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                      Previous Due (৳)
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Phone Number
+                    </label>
+                    <input
+                      name="phone1"
+                      value={form.phone1}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleFormChange}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
+                      Previous Due
                     </label>
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       name="previous_due_amount"
                       value={form.previous_due_amount}
                       onChange={handleFormChange}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] focus:outline-none focus:ring focus:ring-blue-500/30"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     />
                   </div>
 
-                  {/* Address */}
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">
                       Address
                     </label>
                     <textarea
                       name="address"
                       value={form.address}
                       onChange={handleFormChange}
-                      rows={2}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] focus:outline-none focus:ring focus:ring-blue-500/30"
+                      rows={4}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     />
                   </div>
 
-                  {/* Buttons */}
-                  <div className="flex justify-end gap-2 pt-1">
+                  <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
                     <button
                       type="button"
                       onClick={resetFormState}
-                      className="px-3 py-1.5 rounded-full border border-slate-300 text-[11px] text-slate-700 hover:bg-slate-50"
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
                     >
                       Reset
                     </button>
                     <button
                       type="submit"
                       disabled={saving}
-                      className="px-4 py-1.5 rounded-full bg-green-600 text-white text-[11px] font-medium hover:bg-green-700 disabled:opacity-60"
+                      className="min-w-[150px] rounded-full border border-emerald-700 bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-500 disabled:bg-emerald-500 disabled:text-white"
                     >
-                      {saving
-                        ? editingId
-                          ? "Updating..."
-                          : "Saving..."
-                        : editingId
-                        ? "Update"
-                        : "Save"}
+                      {saving ? (editingId ? "Updating..." : "Saving...") : editingId ? "Update Customer" : "Save Customer"}
                     </button>
                   </div>
                 </form>
               </div>
-            </div>
+            </aside>
           )}
         </div>
       </div>
+
+      {customerToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl ring-1 ring-slate-200">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                <FaTrash className="text-lg" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Delete customer?
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  This will permanently remove{" "}
+                  <span className="font-semibold text-slate-800">
+                    {customerToDelete.customer_name}
+                  </span>
+                  {" "}from your customer records.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Customer Summary
+              </div>
+              <div className="mt-2 space-y-1 text-sm text-slate-600">
+                <div>
+                  <span className="font-medium text-slate-800">Phone:</span>{" "}
+                  {customerToDelete.phone1 || "Not provided"}
+                </div>
+                <div>
+                  <span className="font-medium text-slate-800">Email:</span>{" "}
+                  {customerToDelete.email || "Not provided"}
+                </div>
+                <div>
+                  <span className="font-medium text-slate-800">Previous Due:</span>{" "}
+                  {formatCurrency(customerToDelete.previous_due_amount)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteConfirmation}
+                disabled={deleting}
+                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-red-400"
+              >
+                {deleting ? "Deleting..." : "Delete Customer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

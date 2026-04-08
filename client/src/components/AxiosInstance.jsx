@@ -1,13 +1,19 @@
 import axios from 'axios';
 
 const isDevelopment = import.meta.env.MODE === 'development';
-const baseurl = isDevelopment ? import.meta.env.VITE_API_BASE_URL_LOCAL : import.meta.env.VITE_API_BASE_URL_PROD;
+const fallbackBaseUrl = isDevelopment
+  ? 'http://127.0.0.1:8000/api/'
+  : 'http://127.0.0.1:8000/api/';
+const baseurl = isDevelopment
+  ? import.meta.env.VITE_API_BASE_URL_LOCAL || fallbackBaseUrl
+  : import.meta.env.VITE_API_BASE_URL_PROD || fallbackBaseUrl;
 
 //Extract CSRF token from cookies
 const csrfToken = document.cookie.match(/csrftoken=([\w-]+)/)?.[1];
 
 const AxiosInstance = axios.create({
   baseURL: baseurl,
+  timeout: 10000,
   headers: {
     accept: "application/json",
     "X-CSRFToken": csrfToken ? csrfToken : "", 

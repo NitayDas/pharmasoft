@@ -31,12 +31,20 @@ export const UserProvider = ({ children }) => {
 
       localStorage.setItem("access_token", data.access);
       localStorage.setItem("refresh_token", data.refresh);
-
-      await fetchUserData();
+      if (data.user) {
+        setUser(data.user);
+        localStorage.setItem("user", JSON.stringify(data.user));
+      } else {
+        await fetchUserData();
+      }
 
       return data;
     } catch (err) {
-      setError(err.response?.data?.detail || "Login failed");
+      const isTimeout = err.code === "ECONNABORTED";
+      setError(
+        err.response?.data?.detail ||
+        (isTimeout ? "Login timed out. Please check that the backend server is running." : "Login failed")
+      );
       throw err;
     } finally {
       setLoading(false);
@@ -104,7 +112,7 @@ export const UserProvider = ({ children }) => {
     try {
       const refresh = localStorage.getItem("refresh_token");
 
-      const { data } = await AxiosInstance.post("/api/auth/token/refresh/", {
+      const { data } = await AxiosInstance.post("auth/refresh/", {
         refresh,
       });
 

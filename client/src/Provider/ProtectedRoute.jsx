@@ -1,14 +1,16 @@
 import { Navigate } from "react-router-dom";
-import { useUser } from "./UserProvider";
+import { useSelector } from "react-redux";
 
 const ProtectedRoute = ({ children }) => {
-  const {user} = useUser();
+  const user = useSelector((state) => state.auth.user);
 
-    if (!user) {
-      return <Navigate to="/" replace />;
-    }
 
-    return children;
+console.log("user",user)
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children; // Render the protected content if the user is authenticated
 };
 
 export default ProtectedRoute;

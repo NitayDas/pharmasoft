@@ -3,8 +3,10 @@ import Select from "react-select";
 import AxiosInstance from "../../components/AxiosInstance";
 import { toast } from "react-hot-toast";
 import salesService from "../../services/salesService";
+import { useUser } from "../../Provider/UserProvider";
 
 export default function CustomerProductSale() {
+  const { user } = useUser();
   // ---------- Custom Select Styles ----------
   const customSelectStyles = {
     control: (base, state) => ({
@@ -449,6 +451,31 @@ export default function CustomerProductSale() {
     setAddedProducts((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  // ---------- Edit product from added list ----------
+  const editProduct = (idx) => {
+    const productToEdit = addedProducts[idx];
+    if (!productToEdit) return;
+
+    const matchedProduct = productList.find((product) => product.id === productToEdit.id);
+
+    setSelectedProductName({
+      label: productToEdit.productName,
+      value: productToEdit.id,
+    });
+    setSelectedProduct({
+      id: productToEdit.id,
+      product_code: matchedProduct?.product_code,
+    });
+    setCurrentStock(Number(productToEdit.currentStock) || 0);
+    setSaleQuantity(String(productToEdit.saleQuantity ?? ""));
+    setBasePrice(String(productToEdit.basePrice ?? ""));
+    setPrice(String(productToEdit.price ?? ""));
+    setPercentage(String(productToEdit.percentage ?? ""));
+    setTotalPrice(String(productToEdit.totalPrice ?? "0.00"));
+
+    setAddedProducts((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   // ---------- Total amount & payable ----------
   useEffect(() => {
     const total = addedProducts.reduce(
@@ -513,61 +540,74 @@ export default function CustomerProductSale() {
       return;
     }
 
+    if (!user?.id) {
+      toast.error("Logged-in user information is missing. Please sign in again.");
+      return;
+    }
+
     if (addedProducts.length === 0) {
       toast.error("Please add at least one product");
       return;
     }
 
     try {
+      const insufficientProduct = addedProducts.find((product) => {
+        const latestProduct = productList.find((item) => item.id === product.id);
+        return !latestProduct || Number(product.saleQuantity) > Number(latestProduct.stock_quantity);
+      });
+
+      if (insufficientProduct) {
+        const latestProduct = productList.find((item) => item.id === insufficientProduct.id);
+        toast.error(
+          `Insufficient stock for ${insufficientProduct.productName}. Available: ${latestProduct?.stock_quantity ?? 0}.`
+        );
+        return;
+      }
+
+      const paymentMethodLabel = (selectedPaymentModeLabel || "").toLowerCase();
+      const paymentMethod = paymentMethodLabel.includes("card")
+        ? "card"
+        : paymentMethodLabel.includes("mobile") ||
+          paymentMethodLabel.includes("bkash") ||
+          paymentMethodLabel.includes("nagad") ||
+          paymentMethodLabel.includes("rocket")
+        ? "mobile_banking"
+        : "cash";
+
       const payload = {
-        customer_id: selectedCustomer.value,
+        customer_name: selectedCustomer.customer_name || customerData.customer_name || "Walk-in Customer",
+        contact_number: selectedCustomer.phone1 || customerData.phone1 || "",
         sale_date: saleDate,
-        total_amount: parseFloat(totalAmount) || 0,
-        discount_amount: parseFloat(discountAmount) || 0,
-        total_payable_amount: parseFloat(totalPayableAmount) || 0,
-
-        products: addedProducts.map((product) => ({
-          product_id: product.id,
-          product_code: product.productCode,
-          sale_quantity: parseInt(product.saleQuantity),
-          // base price before %
-          price: parseFloat(product.basePrice) || 0,
-          percentage: parseFloat(product.percentage) || 0,
-          // final price after %
-          price_with_percentage: parseFloat(product.price) || 0,
-          total_price: parseFloat(product.totalPrice) || 0,
-        })),
-
-        payments: payments.map((payment) => {
+        served_by: user.id,
+        payment_method: paymentMethod,
+        notes: "",
+        items: addedProducts.map((product) => {
+          const latestProduct = productList.find((item) => item.id === product.id);
           return {
-            payment_mode: payment.paymentMode,
-            bank: payment.bankName || null,
-            account_no: payment.accountNo || null,
-            cheque_no: payment.chequeNo || null,
-            paid_amount: parseFloat(payment.paidAmount) || 0,
-            remarks: payment.remarks || null,
+            product: product.id,
+            item_name: product.productName,
+            batch: latestProduct?.batch || "",
+            unit: latestProduct?.unit || "",
+            qty: parseInt(product.saleQuantity, 10),
+            unit_price: parseFloat(product.price) || 0,
+            discount_percent: parseFloat(product.percentage) || 0,
           };
         }),
       };
 
-      if (editSaleId) {
-        console.log("Updating sale with payload:", payload);
-        await AxiosInstance.put(`sales/${editSaleId}/`, payload);
-        alert("Sale updated successfully!");
-      } else {
-        await AxiosInstance.post("sales/", payload);
-        alert("Sale created successfully!");
-      }
+      await salesService.createSale(payload);
+      toast.success("Sale created successfully.");
+
+      const updatedProducts = await salesService.getProducts();
+      setProductList(updatedProducts);
       resetForm();
     } catch (error) {
       console.error("Submission error:", error.response?.data || error);
       if (error.response?.data) {
         const data = error.response.data;
-        if (data.products) {
-          data.products.forEach((err, index) => {
-            if (err.product) {
-              alert(`Product ${index + 1}: ${err.product.join(" ")}`);
-            }
+        if (data.items && Array.isArray(data.items)) {
+          data.items.forEach((message) => {
+            toast.error(message);
           });
         } else {
           for (const [field, errors] of Object.entries(data)) {
@@ -579,7 +619,7 @@ export default function CustomerProductSale() {
           }
         }
       } else {
-        alert("Failed to submit sale");
+        toast.error("Failed to submit sale");
       }
     }
   };
@@ -652,196 +692,271 @@ export default function CustomerProductSale() {
     }
   };
 
+  const formatCurrency = (value) =>
+    `৳ ${Number(value || 0).toLocaleString("en-BD", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+
   // ---------- RENDER ----------
   return (
-    <div className="max-w-7xl mx-auto p-4 bg-white rounded shadow">
-      {/* Customer Section */}
-      <section>
-        <h2 className="font-semibold text-lg my-2">Customer Details</h2>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+    <div className="mx-auto max-w-7xl space-y-6">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <label className="block mb-1 font-medium text-sm">
-              Select Customer
-            </label>
-            <Select
-              options={customerOptions}
-              value={selectedCustomer}
-              onChange={handleCustomerSelect}
-              isClearable
-              placeholder="Select..."
-              className="text-sm"
-              styles={customSelectStyles}
-              onKeyDown={handleKeyDown}
-            />
+            <h1 className="text-2xl font-semibold text-slate-900">
+              Sales Entry
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Build a sale from customer selection through payment with a cleaner,
+              audit-friendly workflow.
+            </p>
           </div>
 
-          <div>
-            <label className="block mb-1 font-medium text-sm">Phone 1</label>
-            <input
-              type="text"
-              name="phone1"
-              value={customerData.phone1}
-              onChange={handleCustomerChange}
-              className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-              placeholder="Phone..."
-              readOnly
-            />
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs uppercase tracking-wide text-slate-400">
+                Items Added
+              </div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">
+                {addedProducts.length}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs uppercase tracking-wide text-slate-400">
+                Subtotal
+              </div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">
+                {formatCurrency(totalAmount)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs uppercase tracking-wide text-slate-400">
+                Payable
+              </div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">
+                {formatCurrency(totalPayableAmount)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs uppercase tracking-wide text-slate-400">
+                Paid
+              </div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">
+                {formatCurrency(totalPaidAmount)}
+              </div>
+            </div>
           </div>
-
-          <div>
-            <label className="block mb-1 font-medium text-sm">Address</label>
-            <input
-              type="text"
-              name="address"
-              value={customerData.address}
-              onChange={handleCustomerChange}
-              className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-              placeholder="Address..."
-              readOnly
-            />
-          </div>
-
-            <div>
-            <label className="block mb-1 font-medium text-sm">Previous Due Amount</label>
-            <input
-              type="number"
-              name="previous_due_amount"
-              value={customerData.previous_due_amount}
-              onChange={handleCustomerChange}
-              className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-              placeholder="Previous Due Amount..."
-              readOnly
-            />
-          </div>
-
         </div>
       </section>
 
-      {/* Product Sale Section */}
-      <section>
-        <h2 className="font-semibold text-lg my-2">Product Sale</h2>
-
-        <section>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-2">
-            {/* Sale Date */}
-            <div>
-              <label className="block text-sm mb-1 font-medium">
-                Sale Date
-              </label>
-              <input
-                type="date"
-                value={saleDate}
-                onChange={(e) => setSaleDate(e.target.value)}
-                className="w-full text-sm border border-gray-400 px-2 py-1 rounded"
-                onKeyDown={handleKeyDown}
-              />
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <section className="space-y-6">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Customer Details
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Select the customer first so previous due and contact details are visible before billing.
+              </p>
             </div>
 
-            {/* Product Name */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">
-                Product Name *
-              </label>
-              <Select
-                options={productNameOptions}
-                value={selectedProductName}
-                onChange={handleProductNameChange}
-                isClearable
-                placeholder="Select product name"
-                className="text-sm"
-                styles={customSelectStyles}
-                onKeyDown={handleKeyDown}
-                required
-              />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Select Customer
+                </label>
+                <Select
+                  options={customerOptions}
+                  value={selectedCustomer}
+                  onChange={handleCustomerSelect}
+                  isClearable
+                  placeholder="Choose customer"
+                  className="text-sm"
+                  styles={customSelectStyles}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Phone
+                </label>
+                <input
+                  type="text"
+                  name="phone1"
+                  value={customerData.phone1}
+                  onChange={handleCustomerChange}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  placeholder="Phone"
+                  readOnly
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Previous Due
+                </label>
+                <input
+                  type="number"
+                  name="previous_due_amount"
+                  value={customerData.previous_due_amount}
+                  onChange={handleCustomerChange}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  placeholder="Previous due"
+                  readOnly
+                />
+              </div>
+
+              <div className="md:col-span-2 xl:col-span-4">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Address
+                </label>
+                <input
+                  type="text"
+                  name="address"
+                  value={customerData.address}
+                  onChange={handleCustomerChange}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  placeholder="Address"
+                  readOnly
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Product Selection
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Add products line by line with stock visibility, markup control, and quick recalculation.
+                </p>
+              </div>
+              <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+                Sale date: {saleDate}
+              </div>
             </div>
 
-            {/* Current Stock */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">
-                Current Stock Quantity
-              </label>
-              <input
-                type="number"
-                value={currentStock}
-                disabled
-                placeholder="Current stock will appear here"
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400 bg-gray-100"
-              />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Sale Date
+                </label>
+                <input
+                  type="date"
+                  value={saleDate}
+                  onChange={(e) => setSaleDate(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Product Name
+                </label>
+                <Select
+                  options={productNameOptions}
+                  value={selectedProductName}
+                  onChange={handleProductNameChange}
+                  isClearable
+                  placeholder="Select product"
+                  className="text-sm"
+                  styles={customSelectStyles}
+                  onKeyDown={handleKeyDown}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Current Stock
+                </label>
+                <input
+                  type="number"
+                  value={currentStock}
+                  disabled
+                  placeholder="0"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Sale Quantity
+                </label>
+                <input
+                  type="number"
+                  value={saleQuantity}
+                  onChange={(e) => setSaleQuantity(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  placeholder="Enter quantity"
+                  onKeyDown={handleKeyDown}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  MRP
+                </label>
+                <input
+                  type="number"
+                  value={basePrice}
+                  readOnly
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Percentage
+                </label>
+                <input
+                  type="number"
+                  value={percentage}
+                  onChange={(e) => setPercentage(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  placeholder="0"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Final Price
+                </label>
+                <input
+                  type="number"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Line Total
+                </label>
+                <input
+                  type="text"
+                  value={totalPrice}
+                  readOnly
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
             </div>
 
-            {/* Sale Quantity */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">
-                Sale Quantity *
-              </label>
-              <input
-                type="number"
-                value={saleQuantity}
-                onChange={(e) => setSaleQuantity(e.target.value)}
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-                placeholder="Enter sale quantity"
-                onKeyDown={handleKeyDown}
-                required
-              />
-            </div>
-
-            {/* MRP */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">MRP</label>
-              <input
-                type="number"
-                value={basePrice}
-                readOnly
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm bg-gray-100"
-                onKeyDown={handleKeyDown}
-              />
-            </div>
-
-            {/* Percentage */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">
-                Percentage
-              </label>
-              <input
-                type="number"
-                value={percentage}
-                onChange={(e) => setPercentage(e.target.value)}
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-                placeholder="Enter percentage"
-                onKeyDown={handleKeyDown}
-              />
-            </div>
-
-            {/* Price */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">Price *</label>
-              <input
-                type="number"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm bg-gray-100"
-                onKeyDown={handleKeyDown}
-              />
-            </div>
-
-            {/* Total Price */}
-            <div>
-              <label className="block mb-1 font-medium text-sm">
-                Total Price
-              </label>
-              <input
-                type="text"
-                value={totalPrice}
-                readOnly
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm bg-gray-100"
-                onKeyDown={handleKeyDown}
-              />
-            </div>
-
-            {/* Add Button */}
-            <div className="flex items-end">
+            <div className="mt-5 flex justify-end">
               <button
-                className="px-4 py-2 text-sm text-white rounded bg-sky-800 hover:bg-sky-700 focus:bg-green-700 focus:ring-2 focus:ring-green-400 focus:outline-none"
+                className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-100"
                 tabIndex={0}
                 onClick={(e) => {
                   e.preventDefault();
@@ -858,319 +973,373 @@ export default function CustomerProductSale() {
               </button>
             </div>
           </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Added Products
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Review line items before submitting the invoice.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                {addedProducts.length} line{addedProducts.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {addedProducts.length > 0 ? (
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50">
+                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-3 font-medium">Product</th>
+                        <th className="px-4 py-3 text-right font-medium">Stock</th>
+                        <th className="px-4 py-3 text-right font-medium">Qty</th>
+                        <th className="px-4 py-3 text-right font-medium">Price</th>
+                        <th className="px-4 py-3 text-right font-medium">%</th>
+                        <th className="px-4 py-3 text-right font-medium">Total</th>
+                        <th className="px-4 py-3 text-right font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {addedProducts.map((prod, idx) => (
+                        <tr key={idx}>
+                          <td className="px-4 py-3 font-medium text-slate-900">
+                            {prod.productName}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600">
+                            {prod.currentStock}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600">
+                            {prod.saleQuantity}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600">
+                            {formatCurrency(prod.price)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600">
+                            {prod.percentage}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {formatCurrency(prod.totalPrice)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => editProduct(idx)}
+                                className="rounded-full border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50"
+                                onKeyDown={handleKeyDown}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => removeProduct(idx)}
+                                className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                                onKeyDown={handleKeyDown}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
+                No products added yet. Select a product and add it to the invoice.
+              </div>
+            )}
+          </div>
         </section>
 
-        {/* Product Table */}
-        {addedProducts.length > 0 && (
-          <div className="overflow-x-auto my-2">
-            <table className="min-w-full border border-gray-300">
-              <thead className="bg-sky-800 text-md text-white">
-                <tr>
-                  <th className="border px-2 py-1">Product Name</th>
-                  <th className="border px-2 py-1">Current Stock</th>
-                  <th className="border px-2 py-1">Sale Qty</th>
-                  <th className="border px-2 py-1">Sale Price</th>
-                  <th className="border px-2 py-1">Percentage</th>
-                  <th className="border px-2 py-1">Total Price</th>
-                  <th className="border px-2 py-1">Remove</th>
-                </tr>
-              </thead>
-              <tbody>
-                {addedProducts.map((prod, idx) => (
-                  <tr key={idx}>
-                    <td className="border text-center px-2 py-1">
-                      {prod.productName}
-                    </td>
-                    <td className="border text-center px-2 py-1">
-                      {prod.currentStock}
-                    </td>
-                    <td className="border text-center px-2 py-1">
-                      {prod.saleQuantity}
-                    </td>
-                    <td className="border text-center px-2 py-1">
-                      {prod.price}
-                    </td>
-                    <td className="border text-center px-2 py-1">
-                      {prod.percentage}
-                    </td>
-                    <td className="border text-center px-2 py-1">
-                      {prod.totalPrice}
-                    </td>
-                    <td className="border px-2 py-1 text-center">
-                      <button
-                        onClick={() => removeProduct(idx)}
-                        className="px-2 py-1 text-white bg-red-600 hover:bg-red-700 rounded text-xs"
-                        onKeyDown={handleKeyDown}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Totals Section */}
-        <div className="mt-4 max-w-7xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div>
-              <label className="block mb-1 font-medium text-sm">
-                Total Amount:
-              </label>
-              <input
-                type="text"
-                value={
-                  isNaN(Number(totalAmount))
-                    ? "0.00"
-                    : Number(totalAmount).toFixed(2)
-                }
-                readOnly
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-                onKeyDown={handleKeyDown}
-              />
+        <section className="space-y-6">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Invoice Totals
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Review the current invoice value before moving to payments.
+              </p>
             </div>
 
-            <div>
-              <label
-                htmlFor="discount"
-                className="block block mb-1 font-medium text-sm"
-              >
-                Discount Amount:
-              </label>
-              <input
-                id="discount"
-                type="number"
-                min={0}
-                value={discountAmount}
-                onChange={(e) => setDiscountAmount(e.target.value)}
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-                placeholder="0.00"
-                onKeyDown={handleKeyDown}
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Total Amount
+                </label>
+                <input
+                  type="text"
+                  value={
+                    isNaN(Number(totalAmount))
+                      ? "0.00"
+                      : Number(totalAmount).toFixed(2)
+                  }
+                  readOnly
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="discount"
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600"
+                >
+                  Discount Amount
+                </label>
+                <input
+                  id="discount"
+                  type="number"
+                  min={0}
+                  value={discountAmount}
+                  onChange={(e) => setDiscountAmount(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  placeholder="0.00"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Total Payable
+                </label>
+                <input
+                  type="text"
+                  value={
+                    isNaN(Number(totalPayableAmount))
+                      ? "0.00"
+                      : Number(totalPayableAmount).toFixed(2)
+                  }
+                  readOnly
+                  className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-800"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Payment Collection
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Capture payment details and compare them against the invoice total instantly.
+              </p>
             </div>
 
-            <div >
-              <label className="block mb-1 font-medium text-sm">
-                Total Payable Amount:
-              </label>
-              <input
-                type="text"
-                value={
-                  isNaN(Number(totalPayableAmount))
-                    ? "0.00"
-                    : Number(totalPayableAmount).toFixed(2)
-                }
-                readOnly
-                className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-                onKeyDown={handleKeyDown}
-              />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Payment Mode
+                </label>
+                <Select
+                  options={paymentModes}
+                  value={
+                    paymentModes.find(
+                      (pm) => pm.value === paymentData.paymentMode
+                    ) || null
+                  }
+                  onChange={(selected) =>
+                    handlePaymentChange(
+                      "paymentMode",
+                      selected ? selected.value : ""
+                    )
+                  }
+                  placeholder="Select payment mode"
+                  className="text-sm"
+                  styles={customSelectStyles}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Bank Name
+                </label>
+                <Select
+                  options={banks}
+                  value={
+                    banks.find((opt) => opt.value === paymentData.bankName) || null
+                  }
+                  onChange={(selected) =>
+                    handlePaymentChange("bankName", selected ? selected.value : "")
+                  }
+                  placeholder="Select bank"
+                  isClearable
+                  isDisabled={!isBank}
+                  className="text-sm"
+                  styles={customSelectStyles}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Account No
+                </label>
+                <input
+                  type="text"
+                  value={paymentData.accountNo}
+                  onChange={(e) =>
+                    handlePaymentChange("accountNo", e.target.value)
+                  }
+                  disabled={!isBank}
+                  className={`w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition ${
+                    !isBank
+                      ? "bg-slate-50 text-slate-400"
+                      : "bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  }`}
+                  placeholder="Account No"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Cheque No
+                </label>
+                <input
+                  type="text"
+                  value={paymentData.chequeNo}
+                  onChange={(e) =>
+                    handlePaymentChange("chequeNo", e.target.value)
+                  }
+                  disabled={!isCheque}
+                  className={`w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition ${
+                    !isCheque
+                      ? "bg-slate-50 text-slate-400"
+                      : "bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  }`}
+                  placeholder="Cheque No"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Paid Amount
+                </label>
+                <input
+                  type="number"
+                  value={paymentData.paidAmount}
+                  onChange={(e) =>
+                    handlePaymentChange("paidAmount", e.target.value)
+                  }
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  placeholder="0.00"
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* Payment Section */}
-      <div className="mt-4">
-        <h3 className="font-semibold text-lg my-2">Payment</h3>
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-          {/* Payment Mode */}
-          <div>
-            <label className="block text-sm mb-1 font-medium">
-              Payment Mode*
-            </label>
-            <Select
-              options={paymentModes}
-              value={
-                paymentModes.find(
-                  (pm) => pm.value === paymentData.paymentMode
-                ) || null
-              }
-              onChange={(selected) =>
-                handlePaymentChange(
-                  "paymentMode",
-                  selected ? selected.value : ""
-                )
-              }
-              placeholder="Select"
-              className="text-sm"
-              styles={customSelectStyles}
-              onKeyDown={handleKeyDown}
-            />
-          </div>
+            <div className="mt-5 flex justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-slate-400">
+                  Total Paid
+                </div>
+                <div className="mt-1 text-lg font-semibold text-slate-900">
+                  {formatCurrency(totalPaidAmount)}
+                </div>
+              </div>
 
-          {/* Bank Name */}
-          <div>
-            <label className="block text-sm mb-1 font-medium">Bank Name</label>
-            <Select
-              options={banks}
-              value={
-                banks.find((opt) => opt.value === paymentData.bankName) || null
-              }
-              onChange={(selected) =>
-                handlePaymentChange("bankName", selected ? selected.value : "")
-              }
-              placeholder="Select"
-              isClearable
-              isDisabled={!isBank}
-              className="text-sm"
-              styles={customSelectStyles}
-              onKeyDown={handleKeyDown}
-            />
-          </div>
-
-          {/* Account No */}
-          <div>
-            <label className="block text-sm mb-1 font-medium">Account No</label>
-            <input
-              type="text"
-              value={paymentData.accountNo}
-              onChange={(e) =>
-                handlePaymentChange("accountNo", e.target.value)
-              }
-              disabled={!isBank}
-              className={`w-full border border-gray-400 text-sm px-2 py-1 rounded ${
-                !isBank ? "bg-gray-100 text-gray-500" : ""
-              }`}
-              placeholder="Account No"
-              onKeyDown={handleKeyDown}
-            />
-          </div>
-
-          {/* Cheque No */}
-          <div>
-            <label className="block text-sm mb-1 font-medium">Cheque No</label>
-            <input
-              type="text"
-              value={paymentData.chequeNo}
-              onChange={(e) =>
-                handlePaymentChange("chequeNo", e.target.value)
-              }
-              disabled={!isCheque}
-              className={`w-full border border-gray-400 px-2 py-1 rounded ${
-                !isCheque ? "bg-gray-100 text-sm text-gray-400" : ""
-              }`}
-              placeholder="Cheque No"
-              onKeyDown={handleKeyDown}
-            />
-          </div>
-
-          {/* Paid Amount */}
-          <div>
-            <label className="block text-sm mb-1 font-medium">
-              Paid Amount*
-            </label>
-            <input
-              type="number"
-              value={paymentData.paidAmount}
-              onChange={(e) =>
-                handlePaymentChange("paidAmount", e.target.value)
-              }
-              className="w-full border border-gray-400 rounded px-2 py-1 text-sm placeholder-gray-400"
-              placeholder="0.00"
-              onKeyDown={handleKeyDown}
-            />
-          </div>
-
-          {/* Add Payment */}
-          <div className="flex items-end">
-            <button
-              className="px-4 py-2 text-sm text-white rounded bg-sky-800 hover:bg-sky-700 focus:bg-green-700 focus:ring-2 focus:ring-green-400 focus:outline-none"
-              tabIndex={0}
-              onClick={(e) => {
-                e.preventDefault();
-                handleAddPayment();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
+              <button
+                className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-100"
+                tabIndex={0}
+                onClick={(e) => {
                   e.preventDefault();
                   handleAddPayment();
-                }
-              }}
-            >
-              Add
-            </button>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddPayment();
+                  }
+                }}
+              >
+                Add Payment
+              </button>
+            </div>
+
+            {payments.length > 0 && (
+              <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50">
+                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-3 font-medium">Mode</th>
+                        <th className="px-4 py-3 font-medium">Bank</th>
+                        <th className="px-4 py-3 font-medium">Account</th>
+                        <th className="px-4 py-3 font-medium">Cheque</th>
+                        <th className="px-4 py-3 text-right font-medium">Paid</th>
+                        <th className="px-4 py-3 text-right font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {payments.map((pay, idx) => {
+                        const modeLabel =
+                          paymentModes.find((mode) => mode.value === pay.paymentMode)
+                            ?.label || "N/A";
+                        const bankLabel =
+                          banks.find((bank) => bank.value === pay.bankName)?.label ||
+                          "N/A";
+
+                        return (
+                          <tr key={idx}>
+                            <td className="px-4 py-3 text-slate-700">{modeLabel}</td>
+                            <td className="px-4 py-3 text-slate-700">{bankLabel}</td>
+                            <td className="px-4 py-3 text-slate-600">{pay.accountNo || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600">{pay.chequeNo || "-"}</td>
+                            <td className="px-4 py-3 text-right font-medium text-slate-900">
+                              {formatCurrency(pay.paidAmount)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePayment(idx)}
+                                  className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        </section>
       </div>
 
-      {/* Payments Table */}
-      {payments.length > 0 && (
-        <div className="mt-2 overflow-x-auto">
-          <table className="min-w-full border text-center text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="border px-2 py-1">#</th>
-                <th className="border px-2 py-1">Payment Mode</th>
-                <th className="border px-2 py-1">Bank Name</th>
-                <th className="border px-2 py-1">Account No</th>
-                <th className="border px-2 py-1">Cheque No</th>
-                <th className="border px-2 py-1">Paid Amount</th>
-                <th className="border px-2 py-1">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payments.map((pay, idx) => {
-                const modeLabel =
-                  paymentModes.find((mode) => mode.value === pay.paymentMode)
-                    ?.label || "N/A";
-                const bankLabel =
-                  banks.find((bank) => bank.value === pay.bankName)?.label ||
-                  "N/A";
+      <div className="sticky bottom-4 z-10">
+        <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white/95 px-5 py-4 shadow-lg backdrop-blur">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-slate-400">
+              Final Payable
+            </div>
+            <div className="mt-1 text-2xl font-semibold text-slate-900">
+              {formatCurrency(totalPayableAmount)}
+            </div>
+          </div>
 
-                return (
-                  <tr key={idx}>
-                    <td className="border px-2 py-1">{idx + 1}</td>
-                    <td className="border px-2 py-1">{modeLabel}</td>
-                    <td className="border px-2 py-1">{bankLabel}</td>
-                    <td className="border px-2 py-1">{pay.accountNo}</td>
-                    <td className="border px-2 py-1">{pay.chequeNo}</td>
-                    <td className="border px-2 py-1">
-                      {parseFloat(pay.paidAmount || 0).toFixed(2)}
-                    </td>
-                    <td className="border px-2 py-1">
-                      <button
-                        type="button"
-                        onClick={() => handleRemovePayment(idx)}
-                        className="px-2 py-1 text-white bg-red-600 hover:bg-red-700 rounded text-xs"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <button
+            onClick={handleSubmit}
+            className="rounded-full bg-sky-800 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >
+            {editing ? "Update Sale" : "Submit Sale"}
+          </button>
         </div>
-      )}
-
-      {/* Total Paid */}
-      <div className="flex items-center gap-2 mt-4">
-        <label className="block text-sm mb-1 font-medium">
-          Total Paid Amount:
-        </label>
-        <input
-          type="number"
-          value={
-            isNaN(Number(totalPaidAmount))
-              ? "0.00"
-              : Number(totalPaidAmount).toFixed(2)
-          }
-          readOnly
-          className="border rounded px-2 py-1 text-sm placeholder-gray-400"
-        />
-      </div>
-
-      {/* Submit */}
-      <div className="flex justify-center mt-4">
-        <button
-          onClick={handleSubmit}
-          className="px-6 py-2 text-sm bg-sky-800 text-white rounded hover:bg-sky-700"
-        >
-          { editing ? "Update" : "Submit"}
-        </button>
       </div>
     </div>
   );

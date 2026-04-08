@@ -56,14 +56,6 @@ export default function Header() {
             </span>
           )}
 
-          {user && (
-           <ul 
-           onClick={() => navigate("/dashboard")}
-           className="text-sm font-medium text-gray-700 cursor-pointer hover:text-teal-700">
-              Dashboard
-            </ul>
-          )}
-
           {/* Auth Button */}
           <button
             onClick={handleAuth}

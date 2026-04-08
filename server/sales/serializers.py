@@ -4,15 +4,43 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Product, Sale, SaleItem
+from .models import Product, Sale, SaleItem, Customer, Stock
 
 User = get_user_model()
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    stock_quantity = serializers.IntegerField(write_only=True, required=False, min_value=0)
+    current_stock = serializers.IntegerField(source='stock.quantity', read_only=True)
+
     class Meta:
         model = Product
-        fields = ['id', 'name', 'sku', 'batch', 'unit', 'unit_price', 'stock_quantity', 'is_active']
+        fields = ['id', 'name', 'sku', 'batch', 'unit', 'unit_price', 'stock_quantity', 'current_stock', 'is_active']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['stock_quantity'] = data.pop('current_stock', 0)
+        return data
+
+    def create(self, validated_data):
+        stock_quantity = validated_data.pop('stock_quantity', 0)
+        product = Product.objects.create(**validated_data)
+        Stock.objects.create(product=product, quantity=stock_quantity)
+        return product
+
+    def update(self, instance, validated_data):
+        stock_quantity = validated_data.pop('stock_quantity', None)
+
+        for attr, value in validated_data.items():
+          setattr(instance, attr, value)
+        instance.save()
+
+        if stock_quantity is not None:
+            stock, _ = Stock.objects.get_or_create(product=instance)
+            stock.quantity = stock_quantity
+            stock.save(update_fields=['quantity', 'updated_at'])
+
+        return instance
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -54,11 +82,18 @@ class SaleSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items')
+        contact_number = validated_data.get('contact_number', '').strip()
         subtotal = Decimal('0')
         discount_amount = Decimal('0')
 
+        # Try to link to existing customer by phone
+        customer = None
+        if contact_number:
+            customer = Customer.objects.filter(phone=contact_number).first()
+
         sale = Sale.objects.create(
             sale_no=self._generate_sale_no(),
+            customer=customer,
             subtotal=Decimal('0'),
             discount_amount=Decimal('0'),
             vat_amount=Decimal('0'),
@@ -74,9 +109,10 @@ class SaleSerializer(serializers.ModelSerializer):
             unit_price = Decimal(item_data['unit_price'])
             discount_percent = Decimal(item_data.get('discount_percent', 0))
 
-            if product.stock_quantity < int(qty):
+            available_stock = getattr(product.stock, 'quantity', 0)
+            if available_stock < int(qty):
                 raise serializers.ValidationError({
-                    'items': [f'Insufficient stock for {product.name}. Available: {product.stock_quantity}.']
+                    'items': [f'Insufficient stock for {product.name}. Available: {available_stock}.']
                 })
 
             gross_amount = qty * unit_price
@@ -100,8 +136,9 @@ class SaleSerializer(serializers.ModelSerializer):
             subtotal += gross_amount
             discount_amount += line_discount_amount
 
-            product.stock_quantity -= int(qty)
-            product.save(update_fields=['stock_quantity', 'updated_at'])
+            stock, _ = Stock.objects.get_or_create(product=product)
+            stock.quantity -= int(qty)
+            stock.save(update_fields=['quantity', 'updated_at'])
 
         vat_amount = (subtotal * Decimal('0.03')).quantize(Decimal('0.01'))
         grand_total = subtotal - discount_amount + vat_amount
@@ -115,6 +152,13 @@ class SaleSerializer(serializers.ModelSerializer):
         sale.paid_amount = paid_amount
         sale.due_amount = due_amount
         sale.save(update_fields=['subtotal', 'discount_amount', 'vat_amount', 'grand_total', 'paid_amount', 'due_amount'])
+
+        # Update customer totals if linked
+        if customer:
+            customer.total_purchase_amount += grand_total
+            customer.total_due_amount += due_amount
+            customer.save(update_fields=['total_purchase_amount', 'total_due_amount'])
+
         return sale
 
     def _generate_sale_no(self):
@@ -143,3 +187,51 @@ class SaleCreateSerializer(serializers.Serializer):
             'notes': validated_data.get('notes', ''),
             'items': validated_data['items'],
         })
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source='name', required=False)
+    phone1 = serializers.CharField(source='phone', required=False)
+    previous_due_amount = serializers.DecimalField(
+        source='total_due_amount',
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+    )
+
+    class Meta:
+        model = Customer
+        fields = [
+            'id',
+            'name',
+            'phone',
+            'customer_name',
+            'phone1',
+            'email',
+            'address',
+            'previous_due_amount',
+            'total_purchase_amount',
+            'total_due_amount',
+            'medicine_history',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['total_purchase_amount', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'name': {'required': False},
+            'phone': {'required': False},
+            'email': {'required': False, 'allow_blank': True},
+            'address': {'required': False, 'allow_blank': True},
+            'medicine_history': {'required': False, 'allow_blank': True},
+            'total_due_amount': {'required': False},
+        }
+
+    def validate(self, attrs):
+        if self.instance and self.partial:
+            return attrs
+
+        if not attrs.get('name'):
+            raise serializers.ValidationError({'customer_name': 'Customer name is required.'})
+        if not attrs.get('phone'):
+            raise serializers.ValidationError({'phone1': 'Phone number is required.'})
+        return attrs

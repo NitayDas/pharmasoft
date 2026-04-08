@@ -2,12 +2,34 @@
 import AxiosInstance from "../components/AxiosInstance";
 
 const SALES_BASE = '/sales';
+const sortProductsByName = (products) =>
+  [...products].sort((left, right) =>
+    (left.name || "").localeCompare(right.name || "", undefined, {
+      sensitivity: "base",
+    })
+  );
 
 export const salesService = {
-  async getProducts() {
-    const { data } = await AxiosInstance.get(`${SALES_BASE}/products/`);
-    return data;
+  async getProducts(params = {}) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/products/`, {
+      params,
+    });
+    return Array.isArray(data) ? sortProductsByName(data) : data;
 
+  },
+
+  async createProduct(payload) {
+    const { data } = await AxiosInstance.post(`${SALES_BASE}/products/`, payload);
+    return data;
+  },
+
+  async updateProduct(productId, payload) {
+    const { data } = await AxiosInstance.patch(`${SALES_BASE}/products/${productId}/`, payload);
+    return data;
+  },
+
+  async deleteProduct(productId) {
+    await AxiosInstance.delete(`${SALES_BASE}/products/${productId}/`);
   },
 
   async getLatestSale() {
@@ -33,6 +55,22 @@ export const salesService = {
   async createCustomer(payload) {
     const { data } = await AxiosInstance.post(`${SALES_BASE}/customers/create/`, payload);
     return data;
+  },
+
+  async searchCustomers(search) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/customers/`, {
+      params: search ? { search } : {},
+    });
+    return data;
+  },
+
+  async updateCustomer(customerId, payload) {
+    const { data } = await AxiosInstance.patch(`${SALES_BASE}/customers/${customerId}/`, payload);
+    return data;
+  },
+
+  async deleteCustomer(customerId) {
+    await AxiosInstance.delete(`${SALES_BASE}/customers/${customerId}/`);
   },
 };
 
