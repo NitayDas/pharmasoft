@@ -147,6 +147,7 @@ export default function CustomerProductSale() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
   const [editing, setEditing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const query = new URLSearchParams(location.search);
   const editSaleId = query.get("edit");
 
@@ -355,17 +356,17 @@ export default function CustomerProductSale() {
   // ---------- Add product to list ----------
   const addProduct = () => {
     if (!selectedProductName || !selectedProduct) {
-      alert("Please select a product");
+      toast.error("Please select a product.");
       return;
     }
 
     if (!saleQuantity || saleQuantity <= 0) {
-      alert("Please enter a valid sale quantity");
+      toast.error("Please enter a valid sale quantity.");
       return;
     }
 
     if (!price || parseFloat(price) <= 0) {
-      alert("Price is required");
+      toast.error("Price is required.");
       return;
     }
 
@@ -373,7 +374,7 @@ export default function CustomerProductSale() {
       (p) => p.id === selectedProduct.id
     );
     if (existingProduct) {
-      alert("This product is already added to the list");
+      toast.error("This product is already added. Edit the existing line if needed.");
       return;
     }
 
@@ -389,6 +390,7 @@ export default function CustomerProductSale() {
     };
 
     setAddedProducts((prev) => [...prev, newProd]);
+    toast.success(`${selectedProductName.label} added to invoice.`);
 
     // Reset fields
     setSelectedProductName(null);
@@ -447,6 +449,8 @@ export default function CustomerProductSale() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (isSubmitting) return;
+
     if (!selectedCustomer) {
       toast.error("Please select a customer");
       return;
@@ -462,7 +466,13 @@ export default function CustomerProductSale() {
       return;
     }
 
+    if (Number(discountAmount || 0) > Number(totalAmount || 0)) {
+      toast.error("Discount amount cannot exceed total amount.");
+      return;
+    }
+
     try {
+      setIsSubmitting(true);
       const insufficientProduct = addedProducts.find((product) => {
         const latestProduct = productList.find((item) => item.id === product.id);
         return !latestProduct || Number(product.saleQuantity) > Number(latestProduct.stock_quantity);
@@ -497,8 +507,12 @@ export default function CustomerProductSale() {
         }),
       };
 
-      await salesService.createSale(payload);
-      toast.success("Sale created successfully.");
+      const createdSale = await salesService.createSale(payload);
+      toast.success(
+        createdSale?.sale_no
+          ? `Sale ${createdSale.sale_no} submitted successfully.`
+          : "Sale submitted successfully."
+      );
 
       const updatedProducts = await salesService.getProducts();
       setProductList(updatedProducts);
@@ -523,6 +537,8 @@ export default function CustomerProductSale() {
       } else {
         toast.error("Failed to submit sale");
       }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -591,6 +607,12 @@ export default function CustomerProductSale() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
+
+  const canSubmitSale =
+    Boolean(selectedCustomer) &&
+    addedProducts.length > 0 &&
+    !isSubmitting &&
+    Number(discountAmount || 0) <= Number(totalAmount || 0);
 
   // ---------- RENDER ----------
   return (
@@ -1092,13 +1114,17 @@ export default function CustomerProductSale() {
             <div className="mt-1 text-2xl font-semibold text-slate-900">
               {formatCurrency(totalPayableAmount)}
             </div>
+            <div className="mt-1 text-sm text-slate-500">
+              Payment method: {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
+            </div>
           </div>
 
           <button
             onClick={handleSubmit}
-            className="rounded-full bg-sky-800 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+            disabled={!canSubmitSale}
+            className="rounded-full bg-sky-800 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
           >
-            {editing ? "Update Sale" : "Submit Sale"}
+            {isSubmitting ? "Submitting..." : editing ? "Update Sale" : "Submit Sale"}
           </button>
         </div>
       </div>
