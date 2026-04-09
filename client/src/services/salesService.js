@@ -32,29 +32,6 @@ export const salesService = {
     await AxiosInstance.delete(`${SALES_BASE}/products/${productId}/`);
   },
 
-  async importProductPurchases(file) {
-    const formData = new FormData();
-    formData.append("file", file);
-    const { data } = await AxiosInstance.post(`${SALES_BASE}/products/purchase-import/`, formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
-    return data;
-  },
-
-  async getProductPurchaseImportHistory(params = {}) {
-    const { data } = await AxiosInstance.get(`${SALES_BASE}/products/purchase-import/history/`, {
-      params,
-    });
-    return data;
-  },
-
-  async getProductPurchaseImportHistoryDetail(importId) {
-    const { data } = await AxiosInstance.get(`${SALES_BASE}/products/purchase-import/history/${importId}/`);
-    return data;
-  },
-
   async getLatestSale() {
     const { data } = await AxiosInstance.get(`${SALES_BASE}/latest/`);
     return data.sale;
@@ -72,6 +49,16 @@ export const salesService = {
 
   async getInvoices() {
     const { data } = await AxiosInstance.get(`${SALES_BASE}/invoices/`);
+    return data;
+  },
+
+  async getInvoice(invoiceId) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/invoices/${invoiceId}/`);
+    return data;
+  },
+
+  async updateInvoice(invoiceId, payload) {
+    const { data } = await AxiosInstance.patch(`${SALES_BASE}/invoices/${invoiceId}/`, payload);
     return data;
   },
 

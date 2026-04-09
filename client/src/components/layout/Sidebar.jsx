@@ -32,6 +32,12 @@ const menuConfig = [
     items: [
       { label: "Inventory", path: "/stock/inventory" },
       { label: "Products", path: "/stock/products" },
+    ],
+  },
+  {
+    title: "Purchase",
+    icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2l3 6"/><path d="M18 2l-3 6"/><path d="M3 10h18"/><path d="M5 10l1 10a2 2 0 002 2h8a2 2 0 002-2l1-10"/><path d="M9 14h6"/></svg>`,
+    items: [
       { label: "Purchase Import", path: "/stock/purchase-import" },
       { label: "Import History", path: "/stock/purchase-import/history" },
     ],

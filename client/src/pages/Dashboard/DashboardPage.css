@@ -226,6 +226,7 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  gap: 12px;
 }
 
 .db-card-title {
@@ -247,6 +248,22 @@
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.3px;
+}
+
+.db-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.db-invoice-select {
+  min-width: 220px;
+  border: 1px solid #d7e0ea;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 13px;
 }
 
 .db-ghost-btn {
@@ -443,6 +460,11 @@
   margin-bottom: 10px;
 }
 
+.db-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .db-action-btn.is-indigo {
   color: #6366f1;
 }
@@ -470,6 +492,21 @@
 
   .db-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .db-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .db-header-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .db-invoice-select {
+    width: 100%;
   }
 
   .db-invoice-top-grid,

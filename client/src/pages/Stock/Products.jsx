@@ -3,7 +3,7 @@ import { FaBoxOpen, FaEdit, FaPlus, FaSearch, FaTrash } from "react-icons/fa";
 import { toast } from "react-hot-toast";
 import { Link } from "react-router-dom";
 
-import salesService from "../../services/salesService";
+import stockService from "../../services/stockService";
 
 const EMPTY_FORM = {
   name: "",
@@ -60,7 +60,7 @@ export default function Products() {
     try {
       setLoading(true);
       setError("");
-      const data = await salesService.getProducts(searchValue.trim() ? { search: searchValue.trim() } : {});
+      const data = await stockService.getProducts(searchValue.trim() ? { search: searchValue.trim() } : {});
       setProducts(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err.response?.data?.detail || err.message || "Failed to load products.");
@@ -108,10 +108,10 @@ export default function Products() {
       };
 
       if (editingId) {
-        await salesService.updateProduct(editingId, payload);
+        await stockService.updateProduct(editingId, payload);
         toast.success("Product updated successfully.");
       } else {
-        await salesService.createProduct(payload);
+        await stockService.createProduct(payload);
         toast.success("Product added successfully.");
       }
 
@@ -155,7 +155,7 @@ export default function Products() {
     try {
       setDeleting(true);
       setError("");
-      await salesService.deleteProduct(productToDelete.id);
+      await stockService.deleteProduct(productToDelete.id);
       setProducts((current) => current.filter((item) => item.id !== productToDelete.id));
       if (editingId === productToDelete.id) resetFormState();
       setProductToDelete(null);

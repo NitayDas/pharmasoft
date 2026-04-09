@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserProvider, useUser } from '../../Provider/UserProvider';
+import { toast } from 'react-hot-toast';
+
+import { useUser } from '../../Provider/UserProvider';
 import salesService from '../../services/salesService';
 import './DashboardPage.css';
 
@@ -11,57 +13,136 @@ const KPI_LABELS = [
 ];
 
 const QUICK_ACTIONS = [
-  { label: 'Pay with Points', color: 'is-indigo' },
-  { label: 'Full Paid', color: 'is-amber' },
-  { label: 'Cash Payment', color: 'is-green' },
-  { label: 'Card Payment', color: 'is-teal' },
+  { label: 'Pay with Points', color: 'is-indigo', action: 'points' },
+  { label: 'Full Paid', color: 'is-amber', action: 'full_paid' },
+  { label: 'Cash Payment', color: 'is-green', action: 'cash' },
+  { label: 'Card Payment', color: 'is-teal', action: 'card' },
 ];
+
+const EMPTY_SUMMARY = {
+  total_sales: 0,
+  total_discount: 0,
+  sale_count: 0,
+  latest_sale: null,
+};
 
 export default function DashboardPage() {
   const { user } = useUser();
   const navigate = useNavigate();
-  const [dashboardSummary, setDashboardSummary] = useState({
-    total_sales: 0,
-    total_discount: 0,
-    sale_count: 0,
-    latest_sale: null,
-  });
+  const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState('');
+  const [invoices, setInvoices] = useState([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [dashboardSummary, setDashboardSummary] = useState(EMPTY_SUMMARY);
 
   useEffect(() => {
     let active = true;
 
     const loadDashboard = async () => {
       try {
-        const data = await salesService.getDashboardSummary();
-        if (active) setDashboardSummary(data);
+        setLoading(true);
+        const [summaryData, invoicesData] = await Promise.all([
+          salesService.getDashboardSummary(),
+          salesService.getInvoices(),
+        ]);
+
+        if (!active) return;
+
+        const normalizedInvoices = Array.isArray(invoicesData) ? invoicesData : [];
+        const defaultInvoiceId = summaryData?.latest_sale?.id || normalizedInvoices[0]?.id || '';
+
+        setDashboardSummary(summaryData || EMPTY_SUMMARY);
+        setInvoices(normalizedInvoices);
+        setSelectedInvoiceId((current) => current || String(defaultInvoiceId || ''));
       } catch {
-        if (active) {
-          setDashboardSummary({
-            total_sales: 0,
-            total_discount: 0,
-            sale_count: 0,
-            latest_sale: null,
-          });
-        }
+        if (!active) return;
+        setDashboardSummary(EMPTY_SUMMARY);
+        setInvoices([]);
+        setSelectedInvoiceId('');
+      } finally {
+        if (active) setLoading(false);
       }
     };
 
     loadDashboard();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   const formatMoney = (value) => `৳ ${Number(value || 0).toLocaleString('en-BD')}`;
-  const formatLabel = (value) => value ? value.replaceAll('_', ' ') : 'Cash';
+  const formatLabel = (value) =>
+    value ? value.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()) : 'Cash';
 
-  const latestSale = dashboardSummary.latest_sale;
-  const invoiceRows = latestSale?.items || [];
-  const invoiceNo = latestSale?.sale_no || 'No invoice yet';
-  const invoiceDate = latestSale?.sale_date || '—';
-  const subTotal = Number(latestSale?.subtotal || 0);
-  const discountTotal = Number(latestSale?.discount_amount || 0);
-  const netTotal = Number(latestSale?.grand_total || 0);
-  const paidAmount = Number(latestSale?.paid_amount || 0);
-  const dueAmount = Number(latestSale?.due_amount || 0);
+  const selectedSale =
+    invoices.find((sale) => String(sale.id) === String(selectedInvoiceId)) ||
+    dashboardSummary.latest_sale;
+
+  const invoiceRows = selectedSale?.items || [];
+  const invoiceNo = selectedSale?.sale_no || 'No invoice yet';
+  const invoiceDate = selectedSale?.sale_date || '—';
+  const subTotal = Number(selectedSale?.subtotal || 0);
+  const discountTotal = Number(selectedSale?.discount_amount || 0);
+  const netTotal = Number(selectedSale?.grand_total || 0);
+  const paidAmount = Number(selectedSale?.paid_amount || 0);
+  const dueAmount = Number(selectedSale?.due_amount || 0);
+  const statusLabel = !selectedSale
+    ? 'No Sale Yet'
+    : dueAmount <= 0
+      ? 'Paid'
+      : paidAmount > 0
+        ? 'Partially Paid'
+        : 'Unpaid';
+
+  const syncInvoiceInState = (updatedSale) => {
+    setInvoices((current) =>
+      current.map((sale) => (sale.id === updatedSale.id ? updatedSale : sale))
+    );
+    setDashboardSummary((current) => ({
+      ...current,
+      latest_sale:
+        current.latest_sale?.id === updatedSale.id ? updatedSale : current.latest_sale,
+    }));
+    setSelectedInvoiceId(String(updatedSale.id));
+  };
+
+  const handleInvoiceAction = async (action) => {
+    if (!selectedSale?.id) {
+      toast.error('There is no invoice selected yet.');
+      return;
+    }
+
+    if (action === 'points') {
+      toast('Loyalty points payment is not configured in this version yet.');
+      return;
+    }
+
+    const payload = {};
+    if (action === 'full_paid') {
+      payload.paid_amount = selectedSale.grand_total;
+    } else if (action === 'cash') {
+      payload.payment_method = 'cash';
+      payload.paid_amount = selectedSale.grand_total;
+    } else if (action === 'card') {
+      payload.payment_method = 'card';
+      payload.paid_amount = selectedSale.grand_total;
+    }
+
+    try {
+      setActionLoading(action);
+      const updatedSale = await salesService.updateInvoice(selectedSale.id, payload);
+      syncInvoiceInState(updatedSale);
+      toast.success(`Invoice ${updatedSale.sale_no} updated successfully.`);
+    } catch (error) {
+      toast.error(
+        error.response?.data?.detail ||
+        error.response?.data?.paid_amount?.[0] ||
+        'Failed to update invoice.'
+      );
+    } finally {
+      setActionLoading('');
+    }
+  };
 
   return (
     <main className="db-main">
@@ -86,7 +167,26 @@ export default function DashboardPage() {
                 <h2 className="db-card-title">Sales Invoice</h2>
                 <p className="db-card-subtitle">Create, verify, and settle pharmacy sales records</p>
               </div>
-              <div className="db-invoice-chip">{latestSale ? 'Paid' : 'No Sale Yet'}</div>
+
+              <div className="db-header-actions">
+                <select
+                  className="db-invoice-select"
+                  value={selectedInvoiceId}
+                  onChange={(event) => setSelectedInvoiceId(event.target.value)}
+                  disabled={!invoices.length || loading}
+                >
+                  {!invoices.length ? (
+                    <option value="">No invoices</option>
+                  ) : (
+                    invoices.map((invoice) => (
+                      <option key={invoice.id} value={invoice.id}>
+                        {invoice.sale_no} · {invoice.customer_name}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <div className="db-invoice-chip">{statusLabel}</div>
+              </div>
             </div>
 
             <div className="db-invoice-body">
@@ -104,11 +204,13 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="db-meta-label">Cashier</div>
-                      <div className="db-meta-value">{latestSale?.served_by_username || user?.username || 'admin'}</div>
+                      <div className="db-meta-value">
+                        {selectedSale?.served_by_username || user?.username || 'admin'}
+                      </div>
                     </div>
                     <div>
                       <div className="db-meta-label">Payment</div>
-                      <div className="db-meta-value">{formatLabel(latestSale?.payment_method)}</div>
+                      <div className="db-meta-value">{formatLabel(selectedSale?.payment_method)}</div>
                     </div>
                   </div>
                 </div>
@@ -118,7 +220,7 @@ export default function DashboardPage() {
                   <div className="db-party-grid">
                     <div>
                       <div className="db-meta-label">Customer</div>
-                      <div className="db-meta-value">{latestSale?.customer_name || 'Walk-in Customer'}</div>
+                      <div className="db-meta-value">{selectedSale?.customer_name || 'Walk-in Customer'}</div>
                     </div>
                     <div>
                       <div className="db-meta-label">Supplier</div>
@@ -126,7 +228,7 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="db-meta-label">Reference</div>
-                      <div className="db-meta-value">{latestSale?.notes || 'Prescription Sale'}</div>
+                      <div className="db-meta-value">{selectedSale?.notes || 'Prescription Sale'}</div>
                     </div>
                     <div>
                       <div className="db-meta-label">Branch</div>
@@ -164,8 +266,9 @@ export default function DashboardPage() {
                 <div className="db-note-box">
                   <div className="db-panel-title">Notes</div>
                   <p className="db-note-text">
-                    Medicines once sold are not returnable unless a manufacturing defect is identified.
-                    Please keep this invoice for warranty and compliance verification.
+                    {selectedSale?.notes?.trim()
+                      ? selectedSale.notes
+                      : 'Medicines once sold are not returnable unless a manufacturing defect is identified. Please keep this invoice for warranty and compliance verification.'}
                   </p>
                 </div>
 
@@ -198,10 +301,23 @@ export default function DashboardPage() {
           <aside className="db-card db-actions-card">
             <div className="db-actions-title">Quick actions</div>
             {QUICK_ACTIONS.map((action) => (
-              <button key={action.label} type="button" className={`db-action-btn ${action.color}`}>
-                {action.label}
+              <button
+                key={action.label}
+                type="button"
+                className={`db-action-btn ${action.color}`}
+                onClick={() => handleInvoiceAction(action.action)}
+                disabled={!selectedSale || actionLoading === action.action}
+              >
+                {actionLoading === action.action ? 'Updating...' : action.label}
               </button>
             ))}
+            <button
+              type="button"
+              className="db-action-btn"
+              onClick={() => navigate('/sales/payments')}
+            >
+              View All Invoices
+            </button>
           </aside>
         </div>
       </section>

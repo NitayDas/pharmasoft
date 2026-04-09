@@ -4,7 +4,8 @@ import re
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Prefetch
+from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
@@ -17,10 +18,47 @@ from .models import Product, Sale, Customer, Stock, PurchaseImportBatch, Purchas
 from .serializers import (
     ProductSerializer,
     SaleCreateSerializer,
+    SaleInvoiceUpdateSerializer,
     SaleSerializer,
     CustomerSerializer,
     PurchaseImportBatchSerializer,
 )
+
+
+def base_product_queryset():
+    return Product.objects.select_related('stock').only(
+        'id',
+        'name',
+        'sku',
+        'batch',
+        'unit',
+        'unit_price',
+        'is_active',
+        'stock__quantity',
+    )
+
+
+def base_sale_queryset():
+    sale_item_queryset = Sale._meta.get_field('items').related_model.objects.select_related('product').only(
+        'id',
+        'sale_id',
+        'product_id',
+        'item_name',
+        'batch',
+        'unit',
+        'qty',
+        'unit_price',
+        'discount_percent',
+        'gross_amount',
+        'discount_amount',
+        'net_amount',
+        'product__id',
+        'product__name',
+        'product__sku',
+    )
+    return Sale.objects.select_related('served_by', 'customer').prefetch_related(
+        Prefetch('items', queryset=sale_item_queryset)
+    )
 
 
 HEADER_ALIASES = {
@@ -139,7 +177,7 @@ class ProductListView(APIView):
         search = request.query_params.get('search', '').strip()
         status_filter = request.query_params.get('status', '').strip().lower()
 
-        products = Product.objects.select_related('stock').all().order_by('name')
+        products = base_product_queryset().order_by('name')
         if search:
             products = products.filter(
                 Q(name__icontains=search) |
@@ -171,7 +209,7 @@ class ProductDetailView(APIView):
 
     def get(self, request, pk):
         try:
-            product = Product.objects.select_related('stock').get(pk=pk)
+            product = base_product_queryset().get(pk=pk)
             return Response(ProductSerializer(product).data)
         except Product.DoesNotExist:
             return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -228,9 +266,9 @@ class ProductPurchaseImportView(APIView):
 
                 product = None
                 if sku:
-                    product = Product.objects.select_related('stock').filter(sku__iexact=sku).first()
+                    product = base_product_queryset().filter(sku__iexact=sku).first()
                 if product is None and name:
-                    product = Product.objects.select_related('stock').filter(name__iexact=name).first()
+                    product = base_product_queryset().filter(name__iexact=name).first()
 
                 with transaction.atomic():
                     if product:
@@ -342,7 +380,24 @@ class ProductPurchaseImportHistoryListView(APIView):
 
     def get(self, request):
         limit = request.query_params.get('limit')
-        batches = PurchaseImportBatch.objects.select_related('uploaded_by').prefetch_related('rows')
+        batches = PurchaseImportBatch.objects.select_related('uploaded_by').prefetch_related(
+            Prefetch(
+                'rows',
+                queryset=PurchaseImportRow.objects.select_related('product').only(
+                    'id',
+                    'batch_id',
+                    'product_id',
+                    'row_number',
+                    'action',
+                    'product_name',
+                    'sku',
+                    'quantity_added',
+                    'stock_before',
+                    'stock_after',
+                    'message',
+                ),
+            )
+        )
         if limit:
             try:
                 batches = batches[: max(1, min(int(limit), 100))]
@@ -357,7 +412,24 @@ class ProductPurchaseImportHistoryDetailView(APIView):
 
     def get(self, request, pk):
         try:
-            batch = PurchaseImportBatch.objects.select_related('uploaded_by').prefetch_related('rows').get(pk=pk)
+            batch = PurchaseImportBatch.objects.select_related('uploaded_by').prefetch_related(
+                Prefetch(
+                    'rows',
+                    queryset=PurchaseImportRow.objects.select_related('product').only(
+                        'id',
+                        'batch_id',
+                        'product_id',
+                        'row_number',
+                        'action',
+                        'product_name',
+                        'sku',
+                        'quantity_added',
+                        'stock_before',
+                        'stock_after',
+                        'message',
+                    ),
+                )
+            ).get(pk=pk)
         except PurchaseImportBatch.DoesNotExist:
             return Response({'detail': 'Import history record not found.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = PurchaseImportBatchSerializer(batch)
@@ -398,7 +470,7 @@ class SaleCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        sales = Sale.objects.prefetch_related('items').select_related('served_by', 'customer').all().order_by('-created_at')
+        sales = base_sale_queryset().order_by('-created_at')
         serializer = SaleSerializer(sales, many=True)
         return Response(serializer.data)
 
@@ -409,11 +481,37 @@ class SaleCreateView(APIView):
         return Response(SaleSerializer(sale).data, status=status.HTTP_201_CREATED)
 
 
+class SaleDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk):
+        return base_sale_queryset().get(pk=pk)
+
+    def get(self, request, pk):
+        try:
+            sale = self.get_object(pk)
+        except Sale.DoesNotExist:
+            return Response({'detail': 'Invoice not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SaleSerializer(sale).data)
+
+    def patch(self, request, pk):
+        try:
+            sale = self.get_object(pk)
+        except Sale.DoesNotExist:
+            return Response({'detail': 'Invoice not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SaleInvoiceUpdateSerializer(sale, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated_sale = serializer.save()
+        refreshed_sale = base_sale_queryset().get(pk=updated_sale.pk)
+        return Response(SaleSerializer(refreshed_sale).data)
+
+
 class LatestSaleView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        sale = Sale.objects.prefetch_related('items', 'served_by').order_by('-created_at').first()
+        sale = base_sale_queryset().order_by('-created_at').first()
         if not sale:
             return Response({'sale': None})
         return Response({'sale': SaleSerializer(sale).data})
@@ -426,11 +524,19 @@ class DashboardSummaryView(APIView):
         today = timezone.localdate()
         sales_today = Sale.objects.filter(sale_date=today)
         summary = sales_today.aggregate(
-            total_sales=Coalesce(Sum('grand_total'), 0),
-            total_discount=Coalesce(Sum('discount_amount'), 0),
+            total_sales=Coalesce(
+                Sum('grand_total'),
+                Value(Decimal('0.00')),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            total_discount=Coalesce(
+                Sum('discount_amount'),
+                Value(Decimal('0.00')),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
             sale_count=Count('id'),
         )
-        latest_sale = Sale.objects.prefetch_related('items', 'served_by').order_by('-created_at').first()
+        latest_sale = base_sale_queryset().order_by('-created_at').first()
 
         return Response({
             'today': str(today),
@@ -472,7 +578,18 @@ class CustomerListView(APIView):
 
     def get(self, request):
         search = request.query_params.get('search', '').strip()
-        customers = Customer.objects.all().order_by('name')
+        customers = Customer.objects.only(
+            'id',
+            'name',
+            'phone',
+            'email',
+            'address',
+            'total_purchase_amount',
+            'total_due_amount',
+            'medicine_history',
+            'created_at',
+            'updated_at',
+        ).order_by('name')
         if search:
             customers = customers.filter(
                 Q(name__icontains=search) |

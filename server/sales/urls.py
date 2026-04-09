@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .views import (
-    DashboardSummaryView, LatestSaleView, ProductListView, ProductDetailView, SaleCreateView,
+    DashboardSummaryView, LatestSaleView, ProductListView, ProductDetailView, SaleCreateView, SaleDetailView,
     CustomerCreateView, CustomerGetByPhoneView, CustomerListView, CustomerDetailView,
     ProductPurchaseImportView, ProductPurchaseImportHistoryListView, ProductPurchaseImportHistoryDetailView,
 )
@@ -13,6 +13,7 @@ urlpatterns = [
     path('products/purchase-import/history/<int:pk>/', ProductPurchaseImportHistoryDetailView.as_view(), name='product-purchase-import-history-detail'),
     path('products/<int:pk>/', ProductDetailView.as_view(), name='product-detail'),
     path('invoices/', SaleCreateView.as_view(), name='invoice-create'),
+    path('invoices/<int:pk>/', SaleDetailView.as_view(), name='invoice-detail'),
     path('latest/', LatestSaleView.as_view(), name='latest-sale'),
     path('summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
     path('customers/', CustomerListView.as_view(), name='customer-list'),

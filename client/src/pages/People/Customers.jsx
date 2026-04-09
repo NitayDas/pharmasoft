@@ -237,6 +237,7 @@ export default function Customers() {
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-medium">Customer</th>
                         <th className="px-4 py-3 font-medium">Contact</th>
+                        <th className="px-4 py-3 font-medium">Email</th>
                         <th className="px-4 py-3 font-medium">Address</th>
                         <th className="px-4 py-3 text-right font-medium">Previous Due</th>
                         <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -246,20 +247,20 @@ export default function Customers() {
                       {filteredCustomers.map((customer) => (
                         <tr key={customer.id} className="align-top">
                           <td className="px-4 py-3">
-                            <div className="font-medium text-slate-900">
-                              {customer.customer_name}
-                            </div>
-                            {customer.email && (
-                              <div className="mt-1 text-xs text-slate-500">
-                                {customer.email}
-                              </div>
-                            )}
+                            <div className="font-medium text-slate-900">{customer.customer_name}</div>
                           </td>
                           <td className="px-4 py-3">
                             <div className="inline-flex items-center gap-2 text-slate-700">
                               <FaPhoneAlt className="text-xs text-slate-400" />
                               <span>{customer.phone1}</span>
                             </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {customer.email ? (
+                              <span className="break-all">{customer.email}</span>
+                            ) : (
+                              <span className="text-slate-400">Not provided</span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {customer.address || <span className="text-slate-400">Not provided</span>}

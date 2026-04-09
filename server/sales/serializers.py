@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
@@ -65,7 +66,9 @@ class SaleItemSerializer(serializers.ModelSerializer):
 
 
 class SaleItemCreateSerializer(serializers.Serializer):
-    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.select_related('stock').filter(is_active=True)
+    )
     item_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     batch = serializers.CharField(max_length=64, required=False, allow_blank=True)
     unit = serializers.CharField(max_length=32, required=False, allow_blank=True)
@@ -178,7 +181,7 @@ class SaleSerializer(serializers.ModelSerializer):
 class SaleCreateSerializer(serializers.Serializer):
     customer_name = serializers.CharField(max_length=255)
     contact_number = serializers.CharField(max_length=32, required=False, allow_blank=True)
-    sale_date = serializers.DateField()
+    sale_date = serializers.DateField(required=False)
     served_by = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
     payment_method = serializers.ChoiceField(choices=Sale.PAYMENT_METHOD_CHOICES)
     notes = serializers.CharField(required=False, allow_blank=True)
@@ -189,12 +192,56 @@ class SaleCreateSerializer(serializers.Serializer):
         return sale_serializer.create({
             'customer_name': validated_data['customer_name'],
             'contact_number': validated_data.get('contact_number', ''),
-            'sale_date': validated_data['sale_date'],
+            'sale_date': validated_data.get('sale_date', timezone.localdate()),
             'served_by': validated_data['served_by'],
             'payment_method': validated_data['payment_method'],
             'notes': validated_data.get('notes', ''),
             'items': validated_data['items'],
         })
+
+
+class SaleInvoiceUpdateSerializer(serializers.ModelSerializer):
+    paid_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, min_value=Decimal('0.00'))
+    payment_method = serializers.ChoiceField(choices=Sale.PAYMENT_METHOD_CHOICES, required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = Sale
+        fields = ['payment_method', 'paid_amount', 'notes']
+
+    def validate(self, attrs):
+        instance = self.instance
+        paid_amount = attrs.get('paid_amount', instance.paid_amount)
+
+        if paid_amount > instance.grand_total:
+            raise serializers.ValidationError({
+                'paid_amount': 'Paid amount cannot exceed the invoice total.',
+            })
+
+        return attrs
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        old_due = instance.due_amount
+
+        for field in ['payment_method', 'notes']:
+            if field in validated_data:
+                setattr(instance, field, validated_data[field])
+
+        if 'paid_amount' in validated_data:
+            instance.paid_amount = validated_data['paid_amount']
+
+        instance.due_amount = instance.grand_total - instance.paid_amount
+        instance.save(update_fields=['payment_method', 'notes', 'paid_amount', 'due_amount'])
+
+        if instance.customer_id:
+            due_delta = instance.due_amount - old_due
+            if due_delta:
+                customer = instance.customer
+                customer.total_due_amount = max(Decimal('0.00'), customer.total_due_amount + due_delta)
+                customer.save(update_fields=['total_due_amount'])
+
+        return instance
 
 
 class CustomerSerializer(serializers.ModelSerializer):

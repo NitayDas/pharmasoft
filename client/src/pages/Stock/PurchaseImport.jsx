@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FaCheckCircle,
   FaCloudUploadAlt,
@@ -7,12 +7,13 @@ import {
   FaFileExcel,
   FaFileUpload,
   FaHistory,
+  FaPlus,
   FaSyncAlt,
 } from "react-icons/fa";
 import { toast } from "react-hot-toast";
 import { Link } from "react-router-dom";
 
-import salesService from "../../services/salesService";
+import stockService from "../../services/stockService";
 
 const TEMPLATE_HEADERS = [
   "product_name",
@@ -40,12 +41,50 @@ const resultStyles = {
   failed: "bg-red-50 text-red-700 ring-red-200",
 };
 
+const EMPTY_MANUAL_FORM = {
+  name: "",
+  sku: "",
+  batch: "",
+  unit: "Box",
+  unit_price: "",
+  purchase_quantity: "",
+  is_active: true,
+};
+
 export default function PurchaseImport() {
+  const [products, setProducts] = useState([]);
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState("");
+  const [manualForm, setManualForm] = useState(EMPTY_MANUAL_FORM);
   const [error, setError] = useState("");
   const [importReport, setImportReport] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadProducts = async () => {
+      try {
+        const data = await stockService.getProducts();
+        if (active) {
+          setProducts(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (active) {
+          setProducts([]);
+        }
+      }
+    };
+
+    loadProducts();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const summaryCards = useMemo(() => {
     if (!importReport?.summary) return [];
@@ -91,11 +130,42 @@ export default function PurchaseImport() {
     setFile(selectedFile);
   };
 
+  const handleManualChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setManualError("");
+    setManualForm((current) => ({
+      ...current,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
   const resetImportState = () => {
     setFile(null);
     setError("");
     setImportReport(null);
   };
+
+  const resetManualForm = () => {
+    setManualForm(EMPTY_MANUAL_FORM);
+    setManualError("");
+  };
+
+  const matchedProduct = useMemo(() => {
+    const sku = manualForm.sku.trim().toLowerCase();
+    const name = manualForm.name.trim().toLowerCase();
+
+    if (sku) {
+      const exactSkuMatch = products.find((product) => product.sku?.trim().toLowerCase() === sku);
+      if (exactSkuMatch) return exactSkuMatch;
+    }
+
+    if (name) {
+      const exactNameMatch = products.find((product) => product.name?.trim().toLowerCase() === name);
+      if (exactNameMatch) return exactNameMatch;
+    }
+
+    return null;
+  }, [manualForm.name, manualForm.sku, products]);
 
   const downloadTemplate = () => {
     const content = [TEMPLATE_HEADERS.join(","), TEMPLATE_SAMPLE.join(",")].join("\n");
@@ -118,7 +188,7 @@ export default function PurchaseImport() {
     try {
       setUploading(true);
       setError("");
-      const report = await salesService.importProductPurchases(file);
+      const report = await stockService.importProductPurchases(file);
       setImportReport(report);
 
       if (report.summary.failed_rows > 0) {
@@ -132,6 +202,68 @@ export default function PurchaseImport() {
       toast.error(detail);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleManualSubmit = async (event) => {
+    event.preventDefault();
+
+    const purchaseQuantity = Number(manualForm.purchase_quantity);
+    if (!manualForm.name.trim()) {
+      setManualError("Product name is required.");
+      return;
+    }
+    if (!manualForm.sku.trim()) {
+      setManualError("SKU is required.");
+      return;
+    }
+    if (!Number.isFinite(purchaseQuantity) || purchaseQuantity <= 0) {
+      setManualError("Purchase quantity must be greater than zero.");
+      return;
+    }
+
+    try {
+      setManualSaving(true);
+      setManualError("");
+
+      const payload = {
+        name: manualForm.name.trim(),
+        sku: manualForm.sku.trim(),
+        batch: manualForm.batch.trim(),
+        unit: manualForm.unit.trim() || "Box",
+        unit_price: manualForm.unit_price === "" ? "0.00" : manualForm.unit_price,
+        stock_quantity: matchedProduct
+          ? Number(matchedProduct.stock_quantity || 0) + purchaseQuantity
+          : purchaseQuantity,
+        is_active: manualForm.is_active,
+      };
+
+      if (matchedProduct) {
+        await stockService.updateProduct(matchedProduct.id, payload);
+        toast.success(`Purchase added to ${matchedProduct.name}. Stock increased successfully.`);
+      } else {
+        await stockService.createProduct(payload);
+        toast.success("Product created and added to stock successfully.");
+      }
+
+      const refreshedProducts = await stockService.getProducts();
+      setProducts(Array.isArray(refreshedProducts) ? refreshedProducts : []);
+      resetManualForm();
+      setManualMode(false);
+    } catch (err) {
+      const data = err.response?.data;
+      const detail =
+        data?.detail ||
+        (data && typeof data === "object"
+          ? Object.entries(data)
+              .map(([field, messages]) => `${field}: ${[].concat(messages).join(" ")}`)
+              .join(" ")
+          : err.message) ||
+        "Failed to save manual purchase entry.";
+      setManualError(detail);
+      toast.error(detail);
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -150,6 +282,21 @@ export default function PurchaseImport() {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualMode((current) => !current);
+                  setManualError("");
+                }}
+                className={`inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+                  manualMode
+                    ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                }`}
+              >
+                <FaPlus className="text-xs" />
+                {manualMode ? "Close Manual Entry" : "Manual Purchase Entry"}
+              </button>
               <Link
                 to="/stock/purchase-import/history"
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
@@ -169,82 +316,227 @@ export default function PurchaseImport() {
           </div>
 
           <div className="mt-6 grid gap-4 xl:grid-cols-[1.3fr_0.9fr]">
-            <form onSubmit={handleSubmit} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-              <div
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragging(false);
-                  handleFileSelect(event.dataTransfer.files?.[0]);
-                }}
-                className={`rounded-3xl border-2 border-dashed p-6 transition ${
-                  dragging
-                    ? "border-blue-400 bg-blue-50"
-                    : "border-slate-300 bg-white"
-                }`}
-              >
-                <div className="flex flex-col items-center text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600">
-                    <FaFileExcel className="text-2xl" />
-                  </div>
-                  <h2 className="mt-4 text-lg font-semibold text-slate-900">Upload Purchase Sheet</h2>
-                  <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
-                    Drag and drop a purchase file here, or browse from your device. Accepted formats:
-                    <span className="font-medium text-slate-700"> .xlsx </span>
-                    and
-                    <span className="font-medium text-slate-700"> .csv</span>.
-                  </p>
+            <div className="space-y-4">
+              <form onSubmit={handleSubmit} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                <div
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragging(false);
+                    handleFileSelect(event.dataTransfer.files?.[0]);
+                  }}
+                  className={`rounded-3xl border-2 border-dashed p-6 transition ${
+                    dragging
+                      ? "border-blue-400 bg-blue-50"
+                      : "border-slate-300 bg-white"
+                  }`}
+                >
+                  <div className="flex flex-col items-center text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600">
+                      <FaFileExcel className="text-2xl" />
+                    </div>
+                    <h2 className="mt-4 text-lg font-semibold text-slate-900">Upload Purchase Sheet</h2>
+                    <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
+                      Drag and drop a purchase file here, or browse from your device. Accepted formats:
+                      <span className="font-medium text-slate-700"> .xlsx </span>
+                      and
+                      <span className="font-medium text-slate-700"> .csv</span>.
+                    </p>
 
-                  <label className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
-                    <FaFileUpload className="text-xs" />
-                    Choose File
+                    <label className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+                      <FaFileUpload className="text-xs" />
+                      Choose File
+                      <input
+                        type="file"
+                        accept=".xlsx,.csv"
+                        onChange={(event) => handleFileSelect(event.target.files?.[0])}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {file && (
+                      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        <div className="font-medium">{file.name}</div>
+                        <div className="mt-1 text-xs text-emerald-600">
+                          Ready to import into product and stock records.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={resetImportState}
+                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={uploading || !file}
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-emerald-400"
+                  >
+                    {uploading ? <FaSyncAlt className="animate-spin text-xs" /> : <FaCloudUploadAlt className="text-sm" />}
+                    {uploading ? "Importing..." : "Purchase Entry by Excell"}
+                  </button>
+                </div>
+              </form>
+
+              {manualMode && (
+                <form onSubmit={handleManualSubmit} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900">Manual Purchase Entry</h2>
+                      <p className="mt-1 text-sm leading-6 text-slate-500">
+                        Add incoming purchase stock manually. If SKU or exact product name already exists,
+                        the new quantity will be added to the current stock balance.
+                      </p>
+                    </div>
+                    {matchedProduct && (
+                      <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                        <div className="font-medium">Existing product detected</div>
+                        <div className="mt-1 text-xs text-blue-600">
+                          Current stock: {matchedProduct.stock_quantity} · Next stock:{" "}
+                          {Number(matchedProduct.stock_quantity || 0) + Number(manualForm.purchase_quantity || 0)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Product Name
+                      </label>
+                      <input
+                        type="text"
+                        name="name"
+                        value={manualForm.name}
+                        onChange={handleManualChange}
+                        placeholder="Enter product name"
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        SKU
+                      </label>
+                      <input
+                        type="text"
+                        name="sku"
+                        value={manualForm.sku}
+                        onChange={handleManualChange}
+                        placeholder="Enter SKU"
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Batch
+                      </label>
+                      <input
+                        type="text"
+                        name="batch"
+                        value={manualForm.batch}
+                        onChange={handleManualChange}
+                        placeholder="Optional batch number"
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Unit
+                      </label>
+                      <input
+                        type="text"
+                        name="unit"
+                        value={manualForm.unit}
+                        onChange={handleManualChange}
+                        placeholder="Box / Tablet / Capsule"
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Unit Price
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        name="unit_price"
+                        value={manualForm.unit_price}
+                        onChange={handleManualChange}
+                        placeholder="0.00"
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Purchase Quantity
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        name="purchase_quantity"
+                        value={manualForm.purchase_quantity}
+                        onChange={handleManualChange}
+                        placeholder="Enter received quantity"
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="mt-4 inline-flex items-center gap-3 text-sm text-slate-700">
                     <input
-                      type="file"
-                      accept=".xlsx,.csv"
-                      onChange={(event) => handleFileSelect(event.target.files?.[0])}
-                      className="hidden"
+                      type="checkbox"
+                      name="is_active"
+                      checked={manualForm.is_active}
+                      onChange={handleManualChange}
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                     />
+                    Keep this product active for sales and inventory.
                   </label>
 
-                  {file && (
-                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                      <div className="font-medium">{file.name}</div>
-                      <div className="mt-1 text-xs text-emerald-600">
-                        Ready to import into product and stock records.
-                      </div>
+                  {manualError && (
+                    <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {manualError}
                     </div>
                   )}
-                </div>
-              </div>
 
-              {error && (
-                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
+                  <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={resetManualForm}
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    >
+                      Reset Form
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={manualSaving}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-blue-400"
+                    >
+                      {manualSaving ? <FaSyncAlt className="animate-spin text-xs" /> : <FaPlus className="text-xs" />}
+                      {manualSaving ? "Saving..." : "Save Manual Entry"}
+                    </button>
+                  </div>
+                </form>
               )}
-
-              <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={resetImportState}
-                  className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  Reset
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading || !file}
-                  className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-emerald-400"
-                >
-                  {uploading ? <FaSyncAlt className="animate-spin text-xs" /> : <FaCloudUploadAlt className="text-sm" />}
-                  {uploading ? "Importing..." : "Import Purchase File"}
-                </button>
-              </div>
-            </form>
+            </div>
 
             <aside className="rounded-3xl border border-slate-200 bg-white p-5">
               <h2 className="text-lg font-semibold text-slate-900">Supported Columns</h2>

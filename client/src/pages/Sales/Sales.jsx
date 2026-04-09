@@ -125,9 +125,6 @@ export default function CustomerProductSale() {
 
   // ---------- Product / Stock ----------
   const [productList, setProductList] = useState([]);
-  const [saleDate, setSaleDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
   const [addedProducts, setAddedProducts] = useState([]);
   const [totalAmount, setTotalAmount] = useState(0);
   const [discountAmount, setDiscountAmount] = useState("");
@@ -216,9 +213,6 @@ export default function CustomerProductSale() {
       setTotalPayableAmount(parseFloat(sale.total_payable_amount || 0));
       setPaymentMethod(sale.payment_method || "cash");
       setPaymentNote(sale.notes || "");
-
-      // ---------- Sale Date ----------
-      setSaleDate(sale.sale_date || new Date().toISOString().split("T")[0]);
 
       // ---------- Edit Mode ----------
       setEditing(true);
@@ -489,7 +483,6 @@ export default function CustomerProductSale() {
       const payload = {
         customer_name: selectedCustomer.customer_name || customerData.customer_name || "Walk-in Customer",
         contact_number: selectedCustomer.phone1 || customerData.phone1 || "",
-        sale_date: saleDate,
         served_by: user.id,
         payment_method: paymentMethod,
         notes: paymentNote,
@@ -554,7 +547,6 @@ export default function CustomerProductSale() {
 
     setSelectedProductName(null);
     setSelectedProduct(null);
-    setSaleDate(new Date().toISOString().split("T")[0]);
     setAddedProducts([]);
     setTotalAmount(0);
     setTotalPayableAmount(0);
@@ -614,72 +606,30 @@ export default function CustomerProductSale() {
     !isSubmitting &&
     Number(discountAmount || 0) <= Number(totalAmount || 0);
 
+  const saleReference = editing && editSaleId ? `Editing sale #${editSaleId}` : "Auto on submit";
+  const vatPreviewAmount = Number((Number(totalAmount || 0) * 0.03).toFixed(2));
+  const estimatedGrandTotal = Math.max(
+    0,
+    Number((Number(totalAmount || 0) - Number(discountAmount || 0) + vatPreviewAmount).toFixed(2))
+  );
+
   // ---------- RENDER ----------
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">
-              Sales Entry
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Build a sale from customer selection through payment with a cleaner,
-              audit-friendly workflow.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-slate-400">
-                Items Added
-              </div>
-              <div className="mt-1 text-2xl font-semibold text-slate-900">
-                {addedProducts.length}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-slate-400">
-                Subtotal
-              </div>
-              <div className="mt-1 text-lg font-semibold text-slate-900">
-                {formatCurrency(totalAmount)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-slate-400">
-                Payable
-              </div>
-              <div className="mt-1 text-lg font-semibold text-slate-900">
-                {formatCurrency(totalPayableAmount)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-slate-400">
-                Paid
-              </div>
-              <div className="mt-1 text-lg font-semibold text-slate-900">
-                {formatCurrency(totalPayableAmount)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <section className="space-y-6">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <div className="mb-4">
+    <div className="mx-auto max-w-7xl space-y-3 p-4 md:p-5">
+      <div className="grid gap-3 xl:grid-cols-[1.35fr_0.85fr]">
+        <section className="space-y-3">
+          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2">
               <h2 className="text-lg font-semibold text-slate-900">
-                Customer Details
+                Customer & Invoice
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Select the customer first so previous due and contact details are visible before billing.
+                Select the customer and keep the sale header details visible before adding line items.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="md:col-span-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+              <div className="md:col-span-5">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Select Customer
                 </label>
@@ -695,7 +645,19 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Invoice
+                </label>
+                <input
+                  type="text"
+                  value={saleReference}
+                  readOnly
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                />
+              </div>
+
+              <div className="md:col-span-3">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Phone
                 </label>
@@ -710,7 +672,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-3">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Previous Due
                 </label>
@@ -725,7 +687,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div className="md:col-span-2 xl:col-span-4">
+              <div className="md:col-span-12">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Address
                 </label>
@@ -742,36 +704,23 @@ export default function CustomerProductSale() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Product Selection
+                  Sale Product Entry
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Add products line by line with stock visibility, markup control, and quick recalculation.
+                  Add line items with live stock visibility, price adjustment, and instant total calculation.
                 </p>
               </div>
               <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-                Sale date: {saleDate}
+                Product line form
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Sale Date
-                </label>
-                <input
-                  type="date"
-                  value={saleDate}
-                  onChange={(e) => setSaleDate(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
-              <div className="md:col-span-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+              <div className="md:col-span-5">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Product Name
                 </label>
@@ -788,7 +737,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Current Stock
                 </label>
@@ -801,7 +750,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Sale Quantity
                 </label>
@@ -816,7 +765,19 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Unit
+                </label>
+                <input
+                  type="text"
+                  value={productList.find((item) => item.id === selectedProduct?.id)?.unit || ""}
+                  readOnly
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                />
+              </div>
+
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   MRP
                 </label>
@@ -829,7 +790,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-1">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Percentage
                 </label>
@@ -843,7 +804,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Final Price
                 </label>
@@ -856,7 +817,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Line Total
                 </label>
@@ -870,7 +831,7 @@ export default function CustomerProductSale() {
               </div>
             </div>
 
-            <div className="mt-5 flex justify-end">
+            <div className="mt-2 flex justify-end">
               <button
                 className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-100"
                 tabIndex={0}
@@ -890,14 +851,14 @@ export default function CustomerProductSale() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <div className="mb-4 flex items-center justify-between">
+          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
                   Added Products
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Review line items before submitting the invoice.
+                  Review the sale products before final submission.
                 </p>
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
@@ -907,16 +868,16 @@ export default function CustomerProductSale() {
 
             {addedProducts.length > 0 ? (
               <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="overflow-x-auto">
+                <div className="max-h-48 overflow-auto">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50">
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-medium">Product</th>
                         <th className="px-4 py-3 text-right font-medium">Stock</th>
                         <th className="px-4 py-3 text-right font-medium">Qty</th>
-                        <th className="px-4 py-3 text-right font-medium">Price</th>
+                        <th className="px-4 py-3 text-right font-medium">Sale Price</th>
                         <th className="px-4 py-3 text-right font-medium">%</th>
-                        <th className="px-4 py-3 text-right font-medium">Total</th>
+                        <th className="px-4 py-3 text-right font-medium">Total Price</th>
                         <th className="px-4 py-3 text-right font-medium">Actions</th>
                       </tr>
                     </thead>
@@ -973,99 +934,146 @@ export default function CustomerProductSale() {
           </div>
         </section>
 
-        <section className="space-y-6">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Invoice Totals
-              </h2>
+        <section className="space-y-3">
+          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2">
+              <h2 className="text-lg font-semibold text-slate-900">Invoice Summary & Payment</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Review the current invoice value before moving to payments.
+                Follow the invoice-style summary you shared, adapted to this project’s current sale model.
               </p>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Total Amount
-                </label>
-                <input
-                  type="text"
-                  value={
-                    isNaN(Number(totalAmount))
-                      ? "0.00"
-                      : Number(totalAmount).toFixed(2)
-                  }
-                  readOnly
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
-                  onKeyDown={handleKeyDown}
-                />
+            <div className="grid grid-cols-1 gap-2.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Invoice
+                  </label>
+                  <input
+                    type="text"
+                    value={saleReference}
+                    readOnly
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Payment Mode
+                  </label>
+                  <Select
+                    options={PAYMENT_METHOD_OPTIONS}
+                    value={PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod) || null}
+                    onChange={(selected) => setPaymentMethod(selected?.value || "cash")}
+                    placeholder="Select payment mode"
+                    className="text-sm"
+                    styles={customSelectStyles}
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label
-                  htmlFor="discount"
-                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600"
-                >
-                  Discount Amount
-                </label>
-                <input
-                  id="discount"
-                  type="number"
-                  min={0}
-                  value={discountAmount}
-                  onChange={(e) => setDiscountAmount(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  placeholder="0.00"
-                  onKeyDown={handleKeyDown}
-                />
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Total Amount
+                  </label>
+                  <input
+                    type="text"
+                    value={
+                      isNaN(Number(totalAmount))
+                        ? "0.00"
+                        : Number(totalAmount).toFixed(2)
+                    }
+                    readOnly
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="discount"
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  >
+                    Discount Amount
+                  </label>
+                  <input
+                    id="discount"
+                    type="number"
+                    min={0}
+                    value={discountAmount}
+                    onChange={(e) => setDiscountAmount(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    placeholder="0.00"
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    VAT Preview
+                  </label>
+                  <input
+                    type="text"
+                    value={isNaN(Number(vatPreviewAmount)) ? "0.00" : Number(vatPreviewAmount).toFixed(2)}
+                    readOnly
+                    className="w-full rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-semibold text-blue-800"
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Estimated Grand Total
+                  </label>
+                  <input
+                    type="text"
+                    value={isNaN(Number(estimatedGrandTotal)) ? "0.00" : Number(estimatedGrandTotal).toFixed(2)}
+                    readOnly
+                    className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-800"
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Total Payable
-                </label>
-                <input
-                  type="text"
-                  value={
-                    isNaN(Number(totalPayableAmount))
-                      ? "0.00"
-                      : Number(totalPayableAmount).toFixed(2)
-                  }
-                  readOnly
-                  className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-800"
-                  onKeyDown={handleKeyDown}
-                />
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+                <div className="grid grid-cols-2 gap-3 text-sm xl:grid-cols-4">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-slate-400">Items</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">{addedProducts.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-slate-400">Subtotal</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">
+                      {formatCurrency(totalAmount)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-slate-400">Discount</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-900">
+                      {formatCurrency(discountAmount || 0)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-slate-400">Recorded As Paid</div>
+                    <div className="mt-1 text-lg font-semibold text-emerald-700">
+                      {formatCurrency(estimatedGrandTotal)}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Payment Method
+            <div className="mb-1 pt-0.5">
+              <h2 className="text-base font-semibold text-slate-900">
+                Payment Note
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Choose how the sale is paid and keep a short internal note with the invoice.
+                Keep a short remark with the sale, similar to the note fields in your serializer example.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Payment Mode
-                </label>
-                <Select
-                  options={PAYMENT_METHOD_OPTIONS}
-                  value={PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod) || null}
-                  onChange={(selected) => setPaymentMethod(selected?.value || "cash")}
-                  placeholder="Select payment mode"
-                  className="text-sm"
-                  styles={customSelectStyles}
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
+            <div className="grid grid-cols-1 gap-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Internal Note
@@ -1073,14 +1081,14 @@ export default function CustomerProductSale() {
                 <textarea
                   value={paymentNote}
                   onChange={(e) => setPaymentNote(e.target.value)}
-                  rows={4}
+                  rows={2}
                   className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                   placeholder="Optional note for this sale"
                 />
               </div>
             </div>
 
-            <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-4">
+            <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3">
               <div>
                 <div className="text-xs uppercase tracking-wide text-slate-400">
                   Payment Summary
@@ -1093,40 +1101,36 @@ export default function CustomerProductSale() {
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>Recorded as paid</span>
+                    <span>Estimated invoice total</span>
                     <span className="font-semibold text-emerald-700">
-                      {formatCurrency(totalPayableAmount)}
+                      {formatCurrency(estimatedGrandTotal)}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
+            <div className="mt-3 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-slate-400">Final Payable</div>
+                <div className="mt-1 text-xl font-semibold text-slate-900">
+                  {formatCurrency(estimatedGrandTotal)}
+                </div>
+                <div className="mt-1 text-sm text-slate-500">
+                  Payment method: {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
+                </div>
+              </div>
+
+              <button
+                onClick={handleSubmit}
+                disabled={!canSubmitSale}
+                className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
+              >
+                {isSubmitting ? "Submitting..." : editing ? "Update Sale" : "Submit Sale"}
+              </button>
+            </div>
+          </div>
           </div>
         </section>
-      </div>
-
-      <div className="sticky bottom-4 z-10">
-        <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white/95 px-5 py-4 shadow-lg backdrop-blur">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-slate-400">
-              Final Payable
-            </div>
-            <div className="mt-1 text-2xl font-semibold text-slate-900">
-              {formatCurrency(totalPayableAmount)}
-            </div>
-            <div className="mt-1 text-sm text-slate-500">
-              Payment method: {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
-            </div>
-          </div>
-
-          <button
-            onClick={handleSubmit}
-            disabled={!canSubmitSale}
-            className="rounded-full bg-sky-800 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
-          >
-            {isSubmitting ? "Submitting..." : editing ? "Update Sale" : "Submit Sale"}
-          </button>
-        </div>
       </div>
     </div>
   );

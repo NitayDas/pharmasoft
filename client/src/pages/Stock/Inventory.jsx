@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaBoxOpen, FaCubes, FaExclamationTriangle, FaSearch } from "react-icons/fa";
 
-import salesService from "../../services/salesService";
+import stockService from "../../services/stockService";
 
 const formatCurrency = (value) =>
   `৳ ${Number(value || 0).toLocaleString("en-BD", {
@@ -63,7 +63,7 @@ export default function Inventory() {
       try {
         setLoading(true);
         setError("");
-        const data = await salesService.getProducts();
+        const data = await stockService.getProducts();
         setProducts(Array.isArray(data) ? data : []);
       } catch (err) {
         setError(err.response?.data?.detail || err.message || "Failed to load inventory.");
@@ -149,52 +149,78 @@ export default function Inventory() {
             No stock items found yet. Add products from the Products section to populate inventory.
           </div>
         ) : (
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredProducts.map((product) => {
-              const stockMeta = getStockMeta(product.stock_quantity);
-              return (
-                <article
-                  key={product.id}
-                  className={`rounded-3xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${stockMeta.cardTone}`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-lg font-semibold text-slate-900">{product.name}</h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        SKU: {product.sku} {product.batch ? `• Batch: ${product.batch}` : ""}
-                      </p>
-                    </div>
-                    <span
-                      className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${stockMeta.tone}`}
-                    >
-                      {stockMeta.label}
-                    </span>
-                  </div>
+          <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Inventory List</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Compact stock view for faster scanning across more products.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                {filteredProducts.length} items
+              </span>
+            </div>
 
-                  <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-2xl bg-white/80 p-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-400">Stock Qty</div>
-                      <div className="mt-1 text-2xl font-semibold text-slate-900">
-                        {product.stock_quantity}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl bg-white/80 p-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-400">Unit Price</div>
-                      <div className="mt-1 text-lg font-semibold text-slate-900">
-                        {formatCurrency(product.unit_price)}
-                      </div>
-                    </div>
-                  </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-3 font-medium">Product</th>
+                    <th className="px-4 py-3 font-medium">SKU / Batch</th>
+                    <th className="px-4 py-3 font-medium">Unit</th>
+                    <th className="px-4 py-3 text-right font-medium">Stock Qty</th>
+                    <th className="px-4 py-3 text-right font-medium">Unit Price</th>
+                    <th className="px-4 py-3 text-center font-medium">Stock Status</th>
+                    <th className="px-4 py-3 text-center font-medium">Sale Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredProducts.map((product) => {
+                    const stockMeta = getStockMeta(product.stock_quantity);
 
-                  <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
-                    <span>Unit: {product.unit}</span>
-                    <span className={product.is_active ? "text-emerald-700" : "text-slate-500"}>
-                      {product.is_active ? "Active in sales" : "Inactive"}
-                    </span>
-                  </div>
-                </article>
-              );
-            })}
+                    return (
+                      <tr key={product.id} className="align-top transition hover:bg-slate-50/70">
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-slate-900">{product.name}</div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <div className="font-medium text-slate-700">{product.sku}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Batch: {product.batch || "Not set"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{product.unit}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                          {product.stock_quantity}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-slate-800">
+                          {formatCurrency(product.unit_price)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${stockMeta.tone}`}
+                          >
+                            {stockMeta.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${
+                              product.is_active
+                                ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                                : "bg-slate-100 text-slate-600 ring-slate-200"
+                            }`}
+                          >
+                            {product.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
       </div>
