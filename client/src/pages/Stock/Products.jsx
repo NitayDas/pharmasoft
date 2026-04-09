@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FaBoxOpen, FaEdit, FaPlus, FaSearch, FaTrash } from "react-icons/fa";
+import { FaBoxOpen, FaEdit, FaExclamationTriangle, FaPlus, FaSearch, FaTrash } from "react-icons/fa";
 import { toast } from "react-hot-toast";
 import { Link } from "react-router-dom";
 
@@ -34,9 +34,13 @@ export default function Products() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [expiring, setExpiring] = useState(false);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [productToDelete, setProductToDelete] = useState(null);
+  const [productToExpire, setProductToExpire] = useState(null);
+  const [expiryQuantity, setExpiryQuantity] = useState("");
+  const [expiryError, setExpiryError] = useState("");
   const [currentStockLevel, setCurrentStockLevel] = useState(0);
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -167,6 +171,53 @@ export default function Products() {
     }
   };
 
+  const confirmExpiryDeduction = async () => {
+    if (!productToExpire) return;
+
+    const parsedQuantity = Number(expiryQuantity);
+    const availableStock = Number(productToExpire.stock_quantity || 0);
+
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0) {
+      setExpiryError("Please enter a valid expiry quantity greater than zero.");
+      return;
+    }
+
+    if (parsedQuantity > availableStock) {
+      setExpiryError(`Expiry quantity cannot exceed available stock (${availableStock}).`);
+      return;
+    }
+
+    try {
+      setExpiring(true);
+      setExpiryError("");
+
+      const payload = {
+        name: productToExpire.name,
+        sku: productToExpire.sku,
+        batch: productToExpire.batch || "",
+        unit: productToExpire.unit || "Box",
+        unit_price: productToExpire.unit_price ?? "0.00",
+        stock_quantity: availableStock - parsedQuantity,
+        is_active: Boolean(productToExpire.is_active),
+      };
+
+      const updatedProduct = await stockService.updateProduct(productToExpire.id, payload);
+      setProducts((current) =>
+        current.map((item) => (item.id === updatedProduct.id ? updatedProduct : item))
+      );
+      if (editingId === updatedProduct.id) {
+        setCurrentStockLevel(Number(updatedProduct.stock_quantity || 0));
+      }
+      toast.success(`Expiry quantity deducted from ${updatedProduct.name} successfully.`);
+      setProductToExpire(null);
+      setExpiryQuantity("");
+    } catch (err) {
+      setExpiryError(err.response?.data?.detail || err.message || "Failed to reduce expired stock.");
+    } finally {
+      setExpiring(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6">
       <div className="mx-auto max-w-7xl rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
@@ -294,6 +345,18 @@ export default function Products() {
                               >
                                 <FaEdit className="text-xs" />
                                 Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProductToExpire(product);
+                                  setExpiryQuantity("");
+                                  setExpiryError("");
+                                }}
+                                className="inline-flex items-center gap-2 rounded-full border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+                              >
+                                <FaExclamationTriangle className="text-xs" />
+                                Expiry
                               </button>
                               <button
                                 type="button"
@@ -519,6 +582,93 @@ export default function Products() {
                 className="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-red-400"
               >
                 {deleting ? "Deleting..." : "Delete Product"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {productToExpire && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl ring-1 ring-slate-200">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
+                <FaExclamationTriangle className="text-lg" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-semibold text-slate-900">Record expired stock</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Enter the expired quantity for{" "}
+                  <span className="font-semibold text-slate-800">{productToExpire.name}</span>.
+                  The amount will be deducted from available inventory immediately.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Product Summary
+              </div>
+              <div className="mt-2 space-y-1 text-sm text-slate-600">
+                <div><span className="font-medium text-slate-800">SKU:</span> {productToExpire.sku}</div>
+                <div><span className="font-medium text-slate-800">Batch:</span> {productToExpire.batch || "Not set"}</div>
+                <div><span className="font-medium text-slate-800">Current Stock:</span> {productToExpire.stock_quantity}</div>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Expiry Quantity
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={expiryQuantity}
+                onChange={(event) => {
+                  setExpiryQuantity(event.target.value);
+                  setExpiryError("");
+                }}
+                placeholder="Enter expired quantity"
+                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+              />
+              {expiryQuantity !== "" && Number.isFinite(Number(expiryQuantity)) && Number(expiryQuantity) > 0 && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Stock after expiry deduction:{" "}
+                  <span className="font-semibold text-slate-700">
+                    {Math.max(0, Number(productToExpire.stock_quantity || 0) - Number(expiryQuantity))}
+                  </span>
+                </p>
+              )}
+            </div>
+
+            {expiryError && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {expiryError}
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  if (expiring) return;
+                  setProductToExpire(null);
+                  setExpiryQuantity("");
+                  setExpiryError("");
+                }}
+                disabled={expiring}
+                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmExpiryDeduction}
+                disabled={expiring}
+                className="rounded-full bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:cursor-not-allowed disabled:bg-amber-400"
+              >
+                {expiring ? "Saving..." : "Confirm Expiry"}
               </button>
             </div>
           </div>
