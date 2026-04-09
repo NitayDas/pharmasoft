@@ -32,6 +32,7 @@ const menuConfig = [
     items: [
       { label: "Inventory", path: "/stock/inventory" },
       { label: "Products", path: "/stock/products" },
+      { label: "Purchase Import", path: "/stock/purchase-import" },
     ],
   },
   {

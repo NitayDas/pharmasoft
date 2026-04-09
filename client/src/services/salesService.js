@@ -32,6 +32,17 @@ export const salesService = {
     await AxiosInstance.delete(`${SALES_BASE}/products/${productId}/`);
   },
 
+  async importProductPurchases(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const { data } = await AxiosInstance.post(`${SALES_BASE}/products/purchase-import/`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return data;
+  },
+
   async getLatestSale() {
     const { data } = await AxiosInstance.get(`${SALES_BASE}/latest/`);
     return data.sale;

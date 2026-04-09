@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaBoxOpen, FaEdit, FaPlus, FaSearch, FaTrash } from "react-icons/fa";
 import { toast } from "react-hot-toast";
+import { Link } from "react-router-dom";
 
 import salesService from "../../services/salesService";
 
@@ -178,6 +179,13 @@ export default function Products() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Link
+              to="/stock/purchase-import"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            >
+              <FaBoxOpen className="text-xs" />
+              Import Purchases
+            </Link>
             <div className="relative w-full sm:w-80">
               <FaSearch className="absolute left-3 top-3 text-sm text-slate-400" />
               <input
