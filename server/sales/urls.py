@@ -3,12 +3,14 @@ from django.urls import path
 from .views import (
     DashboardSummaryView, LatestSaleView, ProductListView, ProductDetailView, SaleCreateView,
     CustomerCreateView, CustomerGetByPhoneView, CustomerListView, CustomerDetailView,
-    ProductPurchaseImportView,
+    ProductPurchaseImportView, ProductPurchaseImportHistoryListView, ProductPurchaseImportHistoryDetailView,
 )
 
 urlpatterns = [
     path('products/', ProductListView.as_view(), name='product-list'),
     path('products/purchase-import/', ProductPurchaseImportView.as_view(), name='product-purchase-import'),
+    path('products/purchase-import/history/', ProductPurchaseImportHistoryListView.as_view(), name='product-purchase-import-history'),
+    path('products/purchase-import/history/<int:pk>/', ProductPurchaseImportHistoryDetailView.as_view(), name='product-purchase-import-history-detail'),
     path('products/<int:pk>/', ProductDetailView.as_view(), name='product-detail'),
     path('invoices/', SaleCreateView.as_view(), name='invoice-create'),
     path('latest/', LatestSaleView.as_view(), name='latest-sale'),

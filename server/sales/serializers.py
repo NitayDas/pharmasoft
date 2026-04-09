@@ -4,7 +4,15 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Product, Sale, SaleItem, Customer, Stock
+from .models import (
+    Product,
+    Sale,
+    SaleItem,
+    Customer,
+    Stock,
+    PurchaseImportBatch,
+    PurchaseImportRow,
+)
 
 User = get_user_model()
 
@@ -235,3 +243,54 @@ class CustomerSerializer(serializers.ModelSerializer):
         if not attrs.get('phone'):
             raise serializers.ValidationError({'phone1': 'Phone number is required.'})
         return attrs
+
+
+class PurchaseImportRowSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseImportRow
+        fields = [
+            'id',
+            'row_number',
+            'action',
+            'product',
+            'product_name',
+            'sku',
+            'quantity_added',
+            'stock_before',
+            'stock_after',
+            'message',
+        ]
+
+
+class PurchaseImportBatchSerializer(serializers.ModelSerializer):
+    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+    results = PurchaseImportRowSerializer(source='rows', many=True, read_only=True)
+    summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseImportBatch
+        fields = [
+            'id',
+            'file_name',
+            'uploaded_by',
+            'uploaded_by_username',
+            'total_rows',
+            'processed_rows',
+            'created_products',
+            'updated_products',
+            'failed_rows',
+            'total_quantity_added',
+            'created_at',
+            'summary',
+            'results',
+        ]
+
+    def get_summary(self, obj):
+        return {
+            'total_rows': obj.total_rows,
+            'processed_rows': obj.processed_rows,
+            'created_products': obj.created_products,
+            'updated_products': obj.updated_products,
+            'failed_rows': obj.failed_rows,
+            'total_quantity_added': obj.total_quantity_added,
+        }

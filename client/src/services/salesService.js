@@ -43,6 +43,18 @@ export const salesService = {
     return data;
   },
 
+  async getProductPurchaseImportHistory(params = {}) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/products/purchase-import/history/`, {
+      params,
+    });
+    return data;
+  },
+
+  async getProductPurchaseImportHistoryDetail(importId) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/products/purchase-import/history/${importId}/`);
+    return data;
+  },
+
   async getLatestSale() {
     const { data } = await AxiosInstance.get(`${SALES_BASE}/latest/`);
     return data.sale;

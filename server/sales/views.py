@@ -13,8 +13,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Product, Sale, Customer, Stock
-from .serializers import ProductSerializer, SaleCreateSerializer, SaleSerializer, CustomerSerializer
+from .models import Product, Sale, Customer, Stock, PurchaseImportBatch, PurchaseImportRow
+from .serializers import (
+    ProductSerializer,
+    SaleCreateSerializer,
+    SaleSerializer,
+    CustomerSerializer,
+    PurchaseImportBatchSerializer,
+)
 
 
 HEADER_ALIASES = {
@@ -185,7 +191,6 @@ class ProductPurchaseImportView(APIView):
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        results = []
         summary = {
             'total_rows': 0,
             'processed_rows': 0,
@@ -194,6 +199,10 @@ class ProductPurchaseImportView(APIView):
             'failed_rows': 0,
             'total_quantity_added': 0,
         }
+        import_batch = PurchaseImportBatch.objects.create(
+            uploaded_by=request.user if request.user.is_authenticated else None,
+            file_name=upload.name,
+        )
 
         for offset, row in enumerate(rows, start=2):
             if not any(value not in (None, '') for value in row):
@@ -204,7 +213,7 @@ class ProductPurchaseImportView(APIView):
             try:
                 name = str(get_cell(row, header_map, 'name') or '').strip()
                 sku = str(get_cell(row, header_map, 'sku') or '').strip()
-                batch = str(get_cell(row, header_map, 'batch') or '').strip()
+                batch_code = str(get_cell(row, header_map, 'batch') or '').strip()
                 unit = str(get_cell(row, header_map, 'unit') or 'Box').strip() or 'Box'
                 purchase_quantity = parse_integer(
                     get_cell(row, header_map, 'purchase_quantity'),
@@ -235,8 +244,8 @@ class ProductPurchaseImportView(APIView):
                             if duplicate:
                                 raise ValueError(f'SKU "{sku}" already belongs to another product.')
                             product.sku = sku
-                        if batch:
-                            product.batch = batch
+                        if batch_code:
+                            product.batch = batch_code
                         if unit:
                             product.unit = unit
                         if unit_price is not None:
@@ -250,17 +259,18 @@ class ProductPurchaseImportView(APIView):
                         summary['processed_rows'] += 1
                         summary['updated_products'] += 1
                         summary['total_quantity_added'] += purchase_quantity
-                        results.append({
-                            'row_number': offset,
-                            'action': 'updated',
-                            'product_id': product.id,
-                            'product_name': product.name,
-                            'sku': product.sku,
-                            'quantity_added': purchase_quantity,
-                            'stock_before': stock_before,
-                            'stock_after': stock.quantity,
-                            'message': 'Existing stock increased successfully.',
-                        })
+                        PurchaseImportRow.objects.create(
+                            batch=import_batch,
+                            product=product,
+                            row_number=offset,
+                            action='updated',
+                            product_name=product.name,
+                            sku=product.sku,
+                            quantity_added=purchase_quantity,
+                            stock_before=stock_before,
+                            stock_after=stock.quantity,
+                            message='Existing stock increased successfully.',
+                        )
                     else:
                         if not name:
                             raise ValueError('Product name is required for a new product row.')
@@ -270,7 +280,7 @@ class ProductPurchaseImportView(APIView):
                         product = Product.objects.create(
                             name=name,
                             sku=sku,
-                            batch=batch,
+                            batch=batch_code,
                             unit=unit,
                             unit_price=unit_price if unit_price is not None else Decimal('0.00'),
                             is_active=is_active,
@@ -280,34 +290,78 @@ class ProductPurchaseImportView(APIView):
                         summary['processed_rows'] += 1
                         summary['created_products'] += 1
                         summary['total_quantity_added'] += purchase_quantity
-                        results.append({
-                            'row_number': offset,
-                            'action': 'created',
-                            'product_id': product.id,
-                            'product_name': product.name,
-                            'sku': product.sku,
-                            'quantity_added': purchase_quantity,
-                            'stock_before': 0,
-                            'stock_after': stock.quantity,
-                            'message': 'New product created and added to stock.',
-                        })
+                        PurchaseImportRow.objects.create(
+                            batch=import_batch,
+                            product=product,
+                            row_number=offset,
+                            action='created',
+                            product_name=product.name,
+                            sku=product.sku,
+                            quantity_added=purchase_quantity,
+                            stock_before=0,
+                            stock_after=stock.quantity,
+                            message='New product created and added to stock.',
+                        )
             except Exception as exc:
                 summary['failed_rows'] += 1
-                results.append({
-                    'row_number': offset,
-                    'action': 'failed',
-                    'product_name': str(get_cell(row, header_map, 'name') or '').strip(),
-                    'sku': str(get_cell(row, header_map, 'sku') or '').strip(),
-                    'quantity_added': 0,
-                    'stock_before': None,
-                    'stock_after': None,
-                    'message': str(exc),
-                })
+                PurchaseImportRow.objects.create(
+                    batch=import_batch,
+                    row_number=offset,
+                    action='failed',
+                    product_name=str(get_cell(row, header_map, 'name') or '').strip(),
+                    sku=str(get_cell(row, header_map, 'sku') or '').strip(),
+                    quantity_added=0,
+                    stock_before=None,
+                    stock_after=None,
+                    message=str(exc),
+                )
 
-        return Response({
-            'summary': summary,
-            'results': results,
-        })
+        import_batch.total_rows = summary['total_rows']
+        import_batch.processed_rows = summary['processed_rows']
+        import_batch.created_products = summary['created_products']
+        import_batch.updated_products = summary['updated_products']
+        import_batch.failed_rows = summary['failed_rows']
+        import_batch.total_quantity_added = summary['total_quantity_added']
+        import_batch.save(
+            update_fields=[
+                'total_rows',
+                'processed_rows',
+                'created_products',
+                'updated_products',
+                'failed_rows',
+                'total_quantity_added',
+            ]
+        )
+
+        serializer = PurchaseImportBatchSerializer(import_batch)
+        return Response(serializer.data)
+
+
+class ProductPurchaseImportHistoryListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        limit = request.query_params.get('limit')
+        batches = PurchaseImportBatch.objects.select_related('uploaded_by').prefetch_related('rows')
+        if limit:
+            try:
+                batches = batches[: max(1, min(int(limit), 100))]
+            except ValueError:
+                pass
+        serializer = PurchaseImportBatchSerializer(batches, many=True)
+        return Response(serializer.data)
+
+
+class ProductPurchaseImportHistoryDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            batch = PurchaseImportBatch.objects.select_related('uploaded_by').prefetch_related('rows').get(pk=pk)
+        except PurchaseImportBatch.DoesNotExist:
+            return Response({'detail': 'Import history record not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = PurchaseImportBatchSerializer(batch)
+        return Response(serializer.data)
 
     def patch(self, request, pk):
         try:

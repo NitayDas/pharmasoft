@@ -12,6 +12,7 @@ import PeoplePayments from "../pages/People/Payments";
 import Inventory from "../pages/Stock/Inventory";
 import Products from "../pages/Stock/Products";
 import PurchaseImport from "../pages/Stock/PurchaseImport";
+import PurchaseImportHistory from "../pages/Stock/PurchaseImportHistory";
 
 
 
@@ -35,6 +36,7 @@ export default function AppRouter() {
         <Route path="/stock/inventory" element={<Inventory />} />
         <Route path="/stock/products" element={<Products />} />
         <Route path="/stock/purchase-import" element={<PurchaseImport />} />
+        <Route path="/stock/purchase-import/history" element={<PurchaseImportHistory />} />
       </Route>
 
     </Routes>

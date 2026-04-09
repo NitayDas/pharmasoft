@@ -6,9 +6,11 @@ import {
   FaExclamationTriangle,
   FaFileExcel,
   FaFileUpload,
+  FaHistory,
   FaSyncAlt,
 } from "react-icons/fa";
 import { toast } from "react-hot-toast";
+import { Link } from "react-router-dom";
 
 import salesService from "../../services/salesService";
 
@@ -147,14 +149,23 @@ export default function PurchaseImport() {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={downloadTemplate}
-              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            >
-              <FaDownload className="text-xs" />
-              Download Template
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Link
+                to="/stock/purchase-import/history"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              >
+                <FaHistory className="text-xs" />
+                View History
+              </Link>
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              >
+                <FaDownload className="text-xs" />
+                Download Template
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 grid gap-4 xl:grid-cols-[1.3fr_0.9fr]">
