@@ -153,6 +153,7 @@ export default function CustomerProductSale() {
   const [mobileBankingNumber, setMobileBankingNumber] = useState("");
   const [bankName, setBankName] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [editing, setEditing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -319,32 +320,96 @@ export default function CustomerProductSale() {
     }
   };
 
+  const handleSaleQuantityChange = (e) => {
+    const rawValue = e.target.value;
+    if (rawValue === "") {
+      setSaleQuantity("");
+      return;
+    }
+
+    const numericValue = Number(rawValue);
+    if (Number.isNaN(numericValue)) return;
+    setSaleQuantity(String(Math.max(0, numericValue)));
+  };
+
+  const handlePercentageChange = (e) => {
+    const rawValue = e.target.value;
+    if (rawValue === "") {
+      setPercentage("");
+      return;
+    }
+
+    const numericValue = Number(rawValue);
+    if (Number.isNaN(numericValue)) return;
+
+    const normalizedValue = Math.max(0, numericValue);
+    setPercentage(String(normalizedValue));
+
+    if (selectedProduct) {
+      const basePriceNum = Number(basePrice) || 0;
+      const calculatedFinalPrice = basePriceNum + (basePriceNum * normalizedValue) / 100;
+      setPrice(calculatedFinalPrice.toFixed(2));
+    }
+  };
+
+  const handlePriceChange = (e) => {
+    const rawValue = e.target.value;
+    if (rawValue === "") {
+      setPrice("");
+      return;
+    }
+
+    const numericValue = Number(rawValue);
+    if (Number.isNaN(numericValue)) return;
+    setPrice(String(Math.max(0, numericValue)));
+  };
+
+  const handleNumberOnlyKeyDown = (e) => {
+    if (["e", "E", "+", "-"].includes(e.key)) {
+      e.preventDefault();
+    }
+  };
+
   // ---------- Recalculate price & totals ----------
   useEffect(() => {
     if (!selectedProduct) return;
-    const qty = parseInt(saleQuantity) || 0;
+
+    const qty = Number(saleQuantity || 0);
+
+    if (qty < 0) {
+      setSaleQuantity("0");
+      return;
+    }
 
     if (qty > currentStock) {
       if (currentStock > 0) {
         toast.error(`Sale quantity cannot exceed current stock (${currentStock})`);
-        setSaleQuantity(currentStock);
+        setSaleQuantity(String(currentStock));
       } else {
         toast.error("No stock available for this product");
-        setSaleQuantity(0);
+        setSaleQuantity("0");
       }
       return;
     }
 
-    const basePriceNum = parseFloat(basePrice) || 0;
-    const perc = parseFloat(percentage);
-    const manualPrice = parseFloat(price);
+    const basePriceNum = Number(basePrice) || 0;
+    const perc = percentage === "" ? null : Number(percentage);
+    const manualPrice = Number(price || 0);
 
     let finalPrice = 0;
-    if (!isNaN(perc) && perc !== 0) {
+    if (perc !== null && !Number.isNaN(perc)) {
+      if (perc < 0) {
+        setPercentage("0");
+        return;
+      }
+
       finalPrice = basePriceNum + (basePriceNum * perc) / 100;
-      setPrice(finalPrice.toFixed(2));
-    } else if (!isNaN(manualPrice)) {
-      finalPrice = manualPrice;
+      const formattedPrice = finalPrice.toFixed(2);
+      if (formattedPrice !== String(price)) {
+        setPrice(formattedPrice);
+      }
+    } else if (!Number.isNaN(manualPrice)) {
+      finalPrice = Math.max(0, manualPrice);
     }
 
     const tPrice = qty * finalPrice;
@@ -473,6 +538,21 @@ export default function CustomerProductSale() {
       return;
     }
 
+    const paidAmountValue =
+      paymentAmount === "" || Number.isNaN(Number(paymentAmount))
+        ? Number(estimatedGrandTotal || 0)
+        : Number(paymentAmount);
+
+    if (paidAmountValue < 0) {
+      toast.error("Payment amount cannot be negative.");
+      return;
+    }
+
+    if (paidAmountValue > Number(estimatedGrandTotal || 0)) {
+      toast.error("Payment amount cannot exceed estimated grand total.");
+      return;
+    }
+
     if (paymentMethod === "mobile_banking") {
       if (!selectedMobileBanking) {
         toast.error("Please select a mobile banking provider.");
@@ -526,6 +606,8 @@ export default function CustomerProductSale() {
         );
       }
 
+      paymentDetailLines.push(`Amount: ${paidAmountValue.toFixed(2)}`);
+
       const composedNote = [paymentNote.trim(), ...paymentDetailLines].filter(Boolean).join("\n");
 
       const payload = {
@@ -549,10 +631,30 @@ export default function CustomerProductSale() {
       };
 
       const createdSale = await salesService.createSale(payload);
+      let effectiveGrandTotal = Number(createdSale?.grand_total ?? estimatedGrandTotal ?? 0);
+
+      // Update paid amount to keep remaining amount as due for this customer.
+      if (createdSale?.id) {
+        try {
+          const updatedSale = await salesService.updateInvoice(createdSale.id, {
+            paid_amount: paidAmountValue,
+            payment_method: paymentMethod,
+            notes: composedNote,
+          });
+          effectiveGrandTotal = Number(updatedSale?.grand_total ?? effectiveGrandTotal);
+        } catch (patchError) {
+          console.error("Payment update warning:", patchError.response?.data || patchError);
+          toast.error("Sale saved, but payment update failed. Please adjust payment from invoice details.");
+        }
+      }
+
+      const remainingDue = Math.max(0, Number((effectiveGrandTotal - paidAmountValue).toFixed(2)));
       toast.success(
         createdSale?.sale_no
-          ? `Sale ${createdSale.sale_no} submitted successfully.`
-          : "Sale submitted successfully."
+          ? `Sale ${createdSale.sale_no} submitted successfully.${
+              remainingDue > 0 ? ` Due recorded: ${remainingDue.toFixed(2)}` : ""
+            }`
+          : `Sale submitted successfully.${remainingDue > 0 ? ` Due recorded: ${remainingDue.toFixed(2)}` : ""}`
       );
 
       const updatedProducts = await salesService.getProducts();
@@ -598,6 +700,7 @@ export default function CustomerProductSale() {
     setMobileBankingNumber("");
     setBankName("");
     setBankAccountNumber("");
+    setPaymentAmount("");
     setPaymentNote("");
     setBasePrice("");
     setPrice("");
@@ -646,20 +749,29 @@ export default function CustomerProductSale() {
       maximumFractionDigits: 2,
     })}`;
 
-  const canSubmitSale =
-    Boolean(selectedCustomer) &&
-    addedProducts.length > 0 &&
-    (paymentMethod !== "mobile_banking" || (selectedMobileBanking && mobileBankingNumber.trim())) &&
-    (paymentMethod !== "card" || (bankName.trim() && bankAccountNumber.trim())) &&
-    !isSubmitting &&
-    Number(discountAmount || 0) <= Number(totalAmount || 0);
-
   const saleReference = editing && editSaleId ? `Editing sale #${editSaleId}` : "Auto on submit";
   const vatPreviewAmount = Number((Number(totalAmount || 0) * 0.03).toFixed(2));
   const estimatedGrandTotal = Math.max(
     0,
     Number((Number(totalAmount || 0) - Number(discountAmount || 0) + vatPreviewAmount).toFixed(2))
   );
+  const amountToShow =
+    paymentAmount === "" || Number.isNaN(Number(paymentAmount))
+      ? Number(estimatedGrandTotal || 0)
+      : Number(paymentAmount);
+  const remainingDueAmount = Math.max(
+    0,
+    Number((Number(estimatedGrandTotal || 0) - Number(amountToShow || 0)).toFixed(2))
+  );
+  const canSubmitSale =
+    Boolean(selectedCustomer) &&
+    addedProducts.length > 0 &&
+    (paymentMethod !== "mobile_banking" || (selectedMobileBanking && mobileBankingNumber.trim())) &&
+    (paymentMethod !== "card" || (bankName.trim() && bankAccountNumber.trim())) &&
+    Number(amountToShow || 0) >= 0 &&
+    Number(amountToShow || 0) <= Number(estimatedGrandTotal || 0) &&
+    !isSubmitting &&
+    Number(discountAmount || 0) <= Number(totalAmount || 0);
 
   return (
     <div className="mx-auto w-full max-w-[1600px] p-3 md:p-4">
@@ -696,7 +808,7 @@ export default function CustomerProductSale() {
                   name="phone1"
                   value={customerData.phone1}
                   onChange={handleCustomerChange}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
                   placeholder="Phone"
                   readOnly
                 />
@@ -711,7 +823,7 @@ export default function CustomerProductSale() {
                   name="previous_due_amount"
                   value={customerData.previous_due_amount}
                   onChange={handleCustomerChange}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
                   placeholder="Previous due"
                   readOnly
                 />
@@ -726,7 +838,7 @@ export default function CustomerProductSale() {
                   name="address"
                   value={customerData.address}
                   onChange={handleCustomerChange}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
                   placeholder="Address"
                   readOnly
                 />
@@ -766,7 +878,7 @@ export default function CustomerProductSale() {
                   value={currentStock}
                   disabled
                   placeholder="0"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
                 />
               </div>
 
@@ -776,11 +888,15 @@ export default function CustomerProductSale() {
                 </label>
                 <input
                   type="number"
+                  min={0}
                   value={saleQuantity}
-                  onChange={(e) => setSaleQuantity(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  onChange={handleSaleQuantityChange}
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                   placeholder="Enter quantity"
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={(e) => {
+                    handleNumberOnlyKeyDown(e);
+                    handleKeyDown(e);
+                  }}
                   required
                 />
               </div>
@@ -793,7 +909,7 @@ export default function CustomerProductSale() {
                   type="text"
                   value={productList.find((item) => item.id === selectedProduct?.id)?.unit || ""}
                   readOnly
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
                 />
               </div>
 
@@ -805,8 +921,11 @@ export default function CustomerProductSale() {
                   type="number"
                   value={basePrice}
                   readOnly
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
-                  onKeyDown={handleKeyDown}
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
+                  onKeyDown={(e) => {
+                    handleNumberOnlyKeyDown(e);
+                    handleKeyDown(e);
+                  }}
                 />
               </div>
 
@@ -816,11 +935,15 @@ export default function CustomerProductSale() {
                 </label>
                 <input
                   type="number"
+                  min={0}
                   value={percentage}
-                  onChange={(e) => setPercentage(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  onChange={handlePercentageChange}
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                   placeholder="0"
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={(e) => {
+                    handleNumberOnlyKeyDown(e);
+                    handleKeyDown(e);
+                  }}
                 />
               </div>
 
@@ -830,10 +953,14 @@ export default function CustomerProductSale() {
                 </label>
                 <input
                   type="number"
+                  min={0}
                   value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  onKeyDown={handleKeyDown}
+                  onChange={handlePriceChange}
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  onKeyDown={(e) => {
+                    handleNumberOnlyKeyDown(e);
+                    handleKeyDown(e);
+                  }}
                 />
               </div>
 
@@ -845,7 +972,7 @@ export default function CustomerProductSale() {
                   type="text"
                   value={totalPrice}
                   readOnly
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700"
                   onKeyDown={handleKeyDown}
                 />
               </div>
@@ -954,7 +1081,7 @@ export default function CustomerProductSale() {
                   type="text"
                   value={saleReference}
                   readOnly
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700"
                 />
               </div>
 
@@ -967,7 +1094,7 @@ export default function CustomerProductSale() {
                     type="text"
                     value={isNaN(Number(totalAmount)) ? "0.00" : Number(totalAmount).toFixed(2)}
                     readOnly
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"
+                    className="h-[30px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700"
                     onKeyDown={handleKeyDown}
                   />
                 </div>
@@ -985,9 +1112,12 @@ export default function CustomerProductSale() {
                     min={0}
                     value={discountAmount}
                     onChange={(e) => setDiscountAmount(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     placeholder="0.00"
-                    onKeyDown={handleKeyDown}
+                    onKeyDown={(e) => {
+                      handleNumberOnlyKeyDown(e);
+                      handleKeyDown(e);
+                    }}
                   />
                 </div>
 
@@ -999,7 +1129,7 @@ export default function CustomerProductSale() {
                     type="text"
                     value={isNaN(Number(vatPreviewAmount)) ? "0.00" : Number(vatPreviewAmount).toFixed(2)}
                     readOnly
-                    className="w-full rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800"
+                    className="h-[30px] w-full rounded-2xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-800"
                     onKeyDown={handleKeyDown}
                   />
                 </div>
@@ -1012,7 +1142,7 @@ export default function CustomerProductSale() {
                     type="text"
                     value={isNaN(Number(estimatedGrandTotal)) ? "0.00" : Number(estimatedGrandTotal).toFixed(2)}
                     readOnly
-                    className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800"
+                    className="h-[30px] w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800"
                     onKeyDown={handleKeyDown}
                   />
                 </div>
@@ -1068,6 +1198,25 @@ export default function CustomerProductSale() {
                 />
               </div>
 
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Amount
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  placeholder={Number(estimatedGrandTotal || 0).toFixed(2)}
+                  className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  onKeyDown={(e) => {
+                    handleNumberOnlyKeyDown(e);
+                    handleKeyDown(e);
+                  }}
+                />
+              </div>
+
               {paymentMethod === "mobile_banking" && (
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   <div>
@@ -1093,7 +1242,7 @@ export default function CustomerProductSale() {
                       value={mobileBankingNumber}
                       onChange={(e) => setMobileBankingNumber(e.target.value)}
                       placeholder="01XXXXXXXXX"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                       onKeyDown={handleKeyDown}
                     />
                   </div>
@@ -1111,7 +1260,7 @@ export default function CustomerProductSale() {
                       value={bankName}
                       onChange={(e) => setBankName(e.target.value)}
                       placeholder="Enter bank name"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                       onKeyDown={handleKeyDown}
                     />
                   </div>
@@ -1124,7 +1273,7 @@ export default function CustomerProductSale() {
                       value={bankAccountNumber}
                       onChange={(e) => setBankAccountNumber(e.target.value)}
                       placeholder="Enter account number"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      className="h-[30px] w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                       onKeyDown={handleKeyDown}
                     />
                   </div>
@@ -1160,6 +1309,18 @@ export default function CustomerProductSale() {
                       <span>Estimated invoice total</span>
                       <span className="font-semibold text-emerald-700">
                         {formatCurrency(estimatedGrandTotal)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Amount</span>
+                      <span className="font-semibold text-slate-900">
+                        {formatCurrency(amountToShow)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Remaining due</span>
+                      <span className="font-semibold text-amber-700">
+                        {formatCurrency(remainingDueAmount)}
                       </span>
                     </div>
                   </div>
