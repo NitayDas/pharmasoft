@@ -7,8 +7,15 @@ import { useUser } from "../../Provider/UserProvider";
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
-  { value: "card", label: "Card" },
+  { value: "card", label: "Bank" },
   { value: "mobile_banking", label: "Mobile Banking" },
+];
+
+const MOBILE_BANKING_OPTIONS = [
+  { value: "bkash", label: "bKash" },
+  { value: "nagad", label: "Nagad" },
+  { value: "rocket", label: "Rocket" },
+  { value: "upay", label: "Upay" },
 ];
 
 export default function CustomerProductSale() {
@@ -142,89 +149,92 @@ export default function CustomerProductSale() {
 
   // ---------- Payment State ----------
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [selectedMobileBanking, setSelectedMobileBanking] = useState(null);
+  const [mobileBankingNumber, setMobileBankingNumber] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [editing, setEditing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const query = new URLSearchParams(location.search);
   const editSaleId = query.get("edit");
 
-    // ---------- Fetch customers + products ----------
-    useEffect(() => {
+  // ---------- Fetch customers + products ----------
+  useEffect(() => {
     const fetchProductInfo = async () => {
-        try {
+      try {
         const productsData = await salesService.getProducts();
         setProductList(productsData);
 
         console.log("Fetched products:", productsData);
-        } catch (error) {
+      } catch (error) {
         console.error("Error fetching Product data:", error);
         toast.error("Failed to load products.");
-        }
+      }
     };
 
     fetchProductInfo();
-    }, []);
+  }, []);
 
-    useEffect(() => {
+  useEffect(() => {
     const fetchCustomerInfo = async () => {
-        try {
+      try {
         const customersData = await salesService.getCustomers();
         setCustomers(customersData);
         console.log("Fetched customers:", customersData);
-        } catch (error) {
+      } catch (error) {
         console.error("Error fetching Customer data:", error);
         toast.error("Failed to load customers.");
-        }
+      }
     };
     fetchCustomerInfo();
-    }, []);
+  }, []);
 
- useEffect(() => {
-  if (!editSaleId) return;
+  useEffect(() => {
+    if (!editSaleId) return;
 
-  const fetchSale = async () => {
-    try {
-      const res = await AxiosInstance.get(`/sales/${editSaleId}/`);
-      const sale = res.data;
+    const fetchSale = async () => {
+      try {
+        const res = await AxiosInstance.get(`/sales/${editSaleId}/`);
+        const sale = res.data;
 
-      // ---------- Customer ----------
-     const customerOption = customers.find(c => c.id === sale.customer.id);
-     handleCustomerSelect(
-        customerOption
-          ? { label: customerOption.customer_name, value: customerOption.id, ...customerOption }
-          : null
-      );
+        // ---------- Customer ----------
+        const customerOption = customers.find((c) => c.id === sale.customer.id);
+        handleCustomerSelect(
+          customerOption
+            ? { label: customerOption.customer_name, value: customerOption.id, ...customerOption }
+            : null
+        );
 
-      // ---------- Products ----------
-      setAddedProducts(
-        sale.products.map(p => ({
-          id: p.product.id,
-          productName: p.product.product_name,
-          saleQuantity: parseFloat(p.sale_quantity),
-          price: parseFloat(p.sale_price),
-          totalPrice: parseFloat(p.total_price),
-          currentStock: productList.find(product => product.id === p.product.id)?.stock_quantity || 0,
-        }))
-      );
+        // ---------- Products ----------
+        setAddedProducts(
+          sale.products.map((p) => ({
+            id: p.product.id,
+            productName: p.product.product_name,
+            saleQuantity: parseFloat(p.sale_quantity),
+            price: parseFloat(p.sale_price),
+            totalPrice: parseFloat(p.total_price),
+            currentStock: productList.find((product) => product.id === p.product.id)?.stock_quantity || 0,
+          }))
+        );
 
-      // ---------- Totals ----------
-      setTotalAmount(parseFloat(sale.total_amount || 0));
-      setDiscountAmount(parseFloat(sale.discount_amount || 0));
-      setTotalPayableAmount(parseFloat(sale.total_payable_amount || 0));
-      setPaymentMethod(sale.payment_method || "cash");
-      setPaymentNote(sale.notes || "");
+        // ---------- Totals ----------
+        setTotalAmount(parseFloat(sale.total_amount || 0));
+        setDiscountAmount(parseFloat(sale.discount_amount || 0));
+        setTotalPayableAmount(parseFloat(sale.total_payable_amount || 0));
+        setPaymentMethod(sale.payment_method || "cash");
+        setPaymentNote(sale.notes || "");
 
-      // ---------- Edit Mode ----------
-      setEditing(true);
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to fetch sale for edit");
-    }
-  };
+        // ---------- Edit Mode ----------
+        setEditing(true);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to fetch sale for edit");
+      }
+    };
 
-  fetchSale();
-}, [editSaleId, customers]);
-
+    fetchSale();
+  }, [editSaleId, customers]);
 
   // ---------- Select Options ----------
   const customerOptions = customers.map((c) => ({
@@ -274,18 +284,16 @@ export default function CustomerProductSale() {
     const stockQty = product.stock_quantity || 0;
     setCurrentStock(stockQty);
 
-    // Base price: prefer sale_price, then purchase_price, then product.price
-    const basePrice = parseFloat(product.unit_price)
-    const mrpValue = isNaN(basePrice) ? 0 : basePrice;
+    const basePriceValue = parseFloat(product.unit_price);
+    const mrpValue = isNaN(basePriceValue) ? 0 : basePriceValue;
 
-    setBasePrice(mrpValue.toFixed(2)); // base price before % markup
-    setPrice(mrpValue.toFixed(2));   // will be updated after %
+    setBasePrice(mrpValue.toFixed(2));
+    setPrice(mrpValue.toFixed(2));
     setSaleQuantity("");
     setPercentage("");
     setTotalPrice("0.00");
   };
 
-  // When user selects product by name
   const handleProductNameChange = (val) => {
     if (!val) {
       setSelectedProductName(null);
@@ -318,9 +326,7 @@ export default function CustomerProductSale() {
 
     if (qty > currentStock) {
       if (currentStock > 0) {
-        toast.error(
-          `Sale quantity cannot exceed current stock (${currentStock})`
-        );
+        toast.error(`Sale quantity cannot exceed current stock (${currentStock})`);
         setSaleQuantity(currentStock);
       } else {
         toast.error("No stock available for this product");
@@ -333,18 +339,16 @@ export default function CustomerProductSale() {
     const perc = parseFloat(percentage);
     const manualPrice = parseFloat(price);
 
-    // Determine final price
     let finalPrice = 0;
     if (!isNaN(perc) && perc !== 0) {
       finalPrice = basePriceNum + (basePriceNum * perc) / 100;
       setPrice(finalPrice.toFixed(2));
-    } else if (!isNaN(manualPrice) ) {
+    } else if (!isNaN(manualPrice)) {
       finalPrice = manualPrice;
-    } 
-  
+    }
+
     const tPrice = qty * finalPrice;
     setTotalPrice(tPrice.toFixed(2));
-
   }, [percentage, saleQuantity, selectedProduct, currentStock, basePrice, price]);
 
   // ---------- Add product to list ----------
@@ -364,9 +368,7 @@ export default function CustomerProductSale() {
       return;
     }
 
-    const existingProduct = addedProducts.find(
-      (p) => p.id === selectedProduct.id
-    );
+    const existingProduct = addedProducts.find((p) => p.id === selectedProduct.id);
     if (existingProduct) {
       toast.error("This product is already added. Edit the existing line if needed.");
       return;
@@ -377,8 +379,8 @@ export default function CustomerProductSale() {
       productName: selectedProductName.label,
       currentStock: parseInt(currentStock) || 0,
       saleQuantity: parseInt(saleQuantity),
-      basePrice: parseFloat(basePrice) == 0 ? parseFloat(price) : parseFloat(basePrice),   // base price
-      price: parseFloat(price) || 0,       // final price after %
+      basePrice: parseFloat(basePrice) == 0 ? parseFloat(price) : parseFloat(basePrice),
+      price: parseFloat(price) || 0,
       percentage: parseFloat(percentage) || 0,
       totalPrice: parseFloat(totalPrice) || 0,
     };
@@ -386,7 +388,6 @@ export default function CustomerProductSale() {
     setAddedProducts((prev) => [...prev, newProd]);
     toast.success(`${selectedProductName.label} added to invoice.`);
 
-    // Reset fields
     setSelectedProductName(null);
     setSelectedProduct(null);
     setCurrentStock(0);
@@ -397,12 +398,10 @@ export default function CustomerProductSale() {
     setTotalPrice("0.00");
   };
 
-  // ---------- Remove product ----------
   const removeProduct = (idx) => {
     setAddedProducts((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  // ---------- Edit product from added list ----------
   const editProduct = (idx) => {
     const productToEdit = addedProducts[idx];
     if (!productToEdit) return;
@@ -429,15 +428,24 @@ export default function CustomerProductSale() {
 
   // ---------- Total amount & payable ----------
   useEffect(() => {
-    const total = addedProducts.reduce(
-      (acc, p) => acc + parseFloat(p.totalPrice || 0),
-      0
-    );
+    const total = addedProducts.reduce((acc, p) => acc + parseFloat(p.totalPrice || 0), 0);
     setTotalAmount(total);
     const discount = parseFloat(discountAmount) || 0;
     const payable = total - discount;
     setTotalPayableAmount(payable > 0 ? payable : 0);
   }, [addedProducts, discountAmount]);
+
+  useEffect(() => {
+    if (paymentMethod !== "mobile_banking") {
+      setSelectedMobileBanking(null);
+      setMobileBankingNumber("");
+    }
+
+    if (paymentMethod !== "card") {
+      setBankName("");
+      setBankAccountNumber("");
+    }
+  }, [paymentMethod]);
 
   // ---------- Submit sale ----------
   const handleSubmit = async (e) => {
@@ -465,6 +473,28 @@ export default function CustomerProductSale() {
       return;
     }
 
+    if (paymentMethod === "mobile_banking") {
+      if (!selectedMobileBanking) {
+        toast.error("Please select a mobile banking provider.");
+        return;
+      }
+      if (!mobileBankingNumber.trim()) {
+        toast.error("Please enter the mobile banking payment number.");
+        return;
+      }
+    }
+
+    if (paymentMethod === "card") {
+      if (!bankName.trim()) {
+        toast.error("Please enter the bank name.");
+        return;
+      }
+      if (!bankAccountNumber.trim()) {
+        toast.error("Please enter the bank account number.");
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
       const insufficientProduct = addedProducts.find((product) => {
@@ -480,12 +510,30 @@ export default function CustomerProductSale() {
         return;
       }
 
+      const paymentDetailLines = [];
+
+      if (paymentMethod === "mobile_banking") {
+        paymentDetailLines.push(
+          `Mobile banking: ${selectedMobileBanking?.label || "N/A"}`,
+          `Mobile number: ${mobileBankingNumber.trim()}`
+        );
+      }
+
+      if (paymentMethod === "card") {
+        paymentDetailLines.push(
+          `Bank name: ${bankName.trim()}`,
+          `Account number: ${bankAccountNumber.trim()}`
+        );
+      }
+
+      const composedNote = [paymentNote.trim(), ...paymentDetailLines].filter(Boolean).join("\n");
+
       const payload = {
         customer_name: selectedCustomer.customer_name || customerData.customer_name || "Walk-in Customer",
         contact_number: selectedCustomer.phone1 || customerData.phone1 || "",
         served_by: user.id,
         payment_method: paymentMethod,
-        notes: paymentNote,
+        notes: composedNote,
         items: addedProducts.map((product) => {
           const latestProduct = productList.find((item) => item.id === product.id);
           return {
@@ -520,11 +568,7 @@ export default function CustomerProductSale() {
           });
         } else {
           for (const [field, errors] of Object.entries(data)) {
-            toast.error(
-              `${field}: ${
-                Array.isArray(errors) ? errors.join(" ") : errors
-              }`
-            );
+            toast.error(`${field}: ${Array.isArray(errors) ? errors.join(" ") : errors}`);
           }
         }
       } else {
@@ -535,7 +579,6 @@ export default function CustomerProductSale() {
     }
   };
 
-  // ---------- Reset form ----------
   const resetForm = () => {
     setSelectedCustomer(null);
     setCustomerData({
@@ -551,6 +594,10 @@ export default function CustomerProductSale() {
     setTotalAmount(0);
     setTotalPayableAmount(0);
     setPaymentMethod("cash");
+    setSelectedMobileBanking(null);
+    setMobileBankingNumber("");
+    setBankName("");
+    setBankAccountNumber("");
     setPaymentNote("");
     setBasePrice("");
     setPrice("");
@@ -560,7 +607,6 @@ export default function CustomerProductSale() {
     setCurrentStock(0);
   };
 
-  // ---------- Enter key navigation ----------
   const handleKeyDown = (e) => {
     if (e.key !== "Enter") return;
 
@@ -603,6 +649,8 @@ export default function CustomerProductSale() {
   const canSubmitSale =
     Boolean(selectedCustomer) &&
     addedProducts.length > 0 &&
+    (paymentMethod !== "mobile_banking" || (selectedMobileBanking && mobileBankingNumber.trim())) &&
+    (paymentMethod !== "card" || (bankName.trim() && bankAccountNumber.trim())) &&
     !isSubmitting &&
     Number(discountAmount || 0) <= Number(totalAmount || 0);
 
@@ -613,23 +661,17 @@ export default function CustomerProductSale() {
     Number((Number(totalAmount || 0) - Number(discountAmount || 0) + vatPreviewAmount).toFixed(2))
   );
 
-  // ---------- RENDER ----------
   return (
-    <div className="mx-auto max-w-7xl space-y-3 p-4 md:p-5">
-      <div className="grid gap-3 xl:grid-cols-[1.35fr_0.85fr]">
-        <section className="space-y-3">
-          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-2">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Customer & Invoice
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Select the customer and keep the sale header details visible before adding line items.
-              </p>
+    <div className="mx-auto w-full max-w-[1600px] p-3 md:p-4">
+      <div className="grid gap-3 xl:grid-cols-[1.6fr_0.9fr]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="pb-3">
+            <div className="mb-1.5">
+              <h2 className="text-lg font-semibold text-slate-900">Customer</h2>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-              <div className="md:col-span-5">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-12">
+              <div className="md:col-span-4">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Select Customer
                 </label>
@@ -642,18 +684,6 @@ export default function CustomerProductSale() {
                   className="text-sm"
                   styles={customSelectStyles}
                   onKeyDown={handleKeyDown}
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Invoice
-                </label>
-                <input
-                  type="text"
-                  value={saleReference}
-                  readOnly
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"
                 />
               </div>
 
@@ -672,7 +702,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Previous Due
                 </label>
@@ -687,7 +717,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div className="md:col-span-12">
+              <div className="md:col-span-3">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Address
                 </label>
@@ -704,22 +734,12 @@ export default function CustomerProductSale() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Sale Product Entry
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Add line items with live stock visibility, price adjustment, and instant total calculation.
-                </p>
-              </div>
-              <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-                Product line form
-              </div>
+          <div className="border-t border-slate-200 py-3">
+            <div className="mb-1.5">
+              <h2 className="text-lg font-semibold text-slate-900">Sale Product Entry</h2>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-12">
               <div className="md:col-span-5">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Product Name
@@ -790,7 +810,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div className="md:col-span-1">
+              <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Percentage
                 </label>
@@ -804,7 +824,7 @@ export default function CustomerProductSale() {
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div className="md:col-span-2 md:pl-1">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Final Price
                 </label>
@@ -833,7 +853,7 @@ export default function CustomerProductSale() {
 
             <div className="mt-2 flex justify-end">
               <button
-                className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-100"
+                className="rounded-full bg-sky-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-100"
                 tabIndex={0}
                 onClick={(e) => {
                   e.preventDefault();
@@ -851,15 +871,10 @@ export default function CustomerProductSale() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
+          <div className="border-t border-slate-200 pt-3">
+            <div className="mb-2 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Added Products
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Review the sale products before final submission.
-                </p>
+                <h2 className="text-lg font-semibold text-slate-900">Added Products</h2>
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
                 {addedProducts.length} line{addedProducts.length === 1 ? "" : "s"}
@@ -868,7 +883,7 @@ export default function CustomerProductSale() {
 
             {addedProducts.length > 0 ? (
               <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="max-h-48 overflow-auto">
+                <div className="max-h-64 overflow-auto">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50">
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
@@ -884,21 +899,11 @@ export default function CustomerProductSale() {
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {addedProducts.map((prod, idx) => (
                         <tr key={idx}>
-                          <td className="px-4 py-3 font-medium text-slate-900">
-                            {prod.productName}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-600">
-                            {prod.currentStock}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-600">
-                            {prod.saleQuantity}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-600">
-                            {formatCurrency(prod.price)}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-600">
-                            {prod.percentage}
-                          </td>
+                          <td className="px-4 py-3 font-medium text-slate-900">{prod.productName}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{prod.currentStock}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{prod.saleQuantity}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(prod.price)}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{prod.percentage}</td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
                             {formatCurrency(prod.totalPrice)}
                           </td>
@@ -927,7 +932,7 @@ export default function CustomerProductSale() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
                 No products added yet. Select a product and add it to the invoice.
               </div>
             )}
@@ -935,58 +940,34 @@ export default function CustomerProductSale() {
         </section>
 
         <section className="space-y-3">
-          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-2">
-              <h2 className="text-lg font-semibold text-slate-900">Invoice Summary & Payment</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Follow the invoice-style summary you shared, adapted to this project’s current sale model.
-              </p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-1.5">
+              <h2 className="text-lg font-semibold text-slate-900">Invoice Summary</h2>
             </div>
 
-            <div className="grid grid-cols-1 gap-2.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Invoice
-                  </label>
-                  <input
-                    type="text"
-                    value={saleReference}
-                    readOnly
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Payment Mode
-                  </label>
-                  <Select
-                    options={PAYMENT_METHOD_OPTIONS}
-                    value={PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod) || null}
-                    onChange={(selected) => setPaymentMethod(selected?.value || "cash")}
-                    placeholder="Select payment mode"
-                    className="text-sm"
-                    styles={customSelectStyles}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
+            <div className="grid grid-cols-1 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Invoice
+                </label>
+                <input
+                  type="text"
+                  value={saleReference}
+                  readOnly
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                     Total Amount
                   </label>
                   <input
                     type="text"
-                    value={
-                      isNaN(Number(totalAmount))
-                        ? "0.00"
-                        : Number(totalAmount).toFixed(2)
-                    }
+                    value={isNaN(Number(totalAmount)) ? "0.00" : Number(totalAmount).toFixed(2)}
                     readOnly
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"
                     onKeyDown={handleKeyDown}
                   />
                 </div>
@@ -1004,7 +985,7 @@ export default function CustomerProductSale() {
                     min={0}
                     value={discountAmount}
                     onChange={(e) => setDiscountAmount(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     placeholder="0.00"
                     onKeyDown={handleKeyDown}
                   />
@@ -1018,7 +999,7 @@ export default function CustomerProductSale() {
                     type="text"
                     value={isNaN(Number(vatPreviewAmount)) ? "0.00" : Number(vatPreviewAmount).toFixed(2)}
                     readOnly
-                    className="w-full rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-semibold text-blue-800"
+                    className="w-full rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800"
                     onKeyDown={handleKeyDown}
                   />
                 </div>
@@ -1031,13 +1012,13 @@ export default function CustomerProductSale() {
                     type="text"
                     value={isNaN(Number(estimatedGrandTotal)) ? "0.00" : Number(estimatedGrandTotal).toFixed(2)}
                     readOnly
-                    className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-800"
+                    className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800"
                     onKeyDown={handleKeyDown}
                   />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="grid grid-cols-2 gap-3 text-sm xl:grid-cols-4">
                   <div>
                     <div className="text-xs uppercase tracking-wide text-slate-400">Items</div>
@@ -1063,72 +1044,147 @@ export default function CustomerProductSale() {
                   </div>
                 </div>
               </div>
-
-            <div className="mb-1 pt-0.5">
-              <h2 className="text-base font-semibold text-slate-900">
-                Payment Note
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Keep a short remark with the sale, similar to the note fields in your serializer example.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Internal Note
-                </label>
-                <textarea
-                  value={paymentNote}
-                  onChange={(e) => setPaymentNote(e.target.value)}
-                  rows={2}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                  placeholder="Optional note for this sale"
-                />
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-slate-400">
-                  Payment Summary
-                </div>
-                <div className="mt-2 space-y-2 text-sm text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <span>Selected method</span>
-                    <span className="font-medium text-slate-900">
-                      {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Estimated invoice total</span>
-                    <span className="font-semibold text-emerald-700">
-                      {formatCurrency(estimatedGrandTotal)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-slate-400">Final Payable</div>
-                <div className="mt-1 text-xl font-semibold text-slate-900">
-                  {formatCurrency(estimatedGrandTotal)}
-                </div>
-                <div className="mt-1 text-sm text-slate-500">
-                  Payment method: {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
-                </div>
-              </div>
-
-              <button
-                onClick={handleSubmit}
-                disabled={!canSubmitSale}
-                className="rounded-full bg-sky-800 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
-              >
-                {isSubmitting ? "Submitting..." : editing ? "Update Sale" : "Submit Sale"}
-              </button>
             </div>
           </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-1.5">
+              <h2 className="text-lg font-semibold text-slate-900">Payment</h2>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Payment Method
+                </label>
+                <Select
+                  options={PAYMENT_METHOD_OPTIONS}
+                  value={PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod) || null}
+                  onChange={(selected) => setPaymentMethod(selected?.value || "cash")}
+                  placeholder="Select payment method"
+                  className="text-sm"
+                  styles={customSelectStyles}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+
+              {paymentMethod === "mobile_banking" && (
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Mobile Banking
+                    </label>
+                    <Select
+                      options={MOBILE_BANKING_OPTIONS}
+                      value={selectedMobileBanking}
+                      onChange={(selected) => setSelectedMobileBanking(selected)}
+                      placeholder="Select mobile banking"
+                      className="text-sm"
+                      styles={customSelectStyles}
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Payment Mobile Number
+                    </label>
+                    <input
+                      type="text"
+                      value={mobileBankingNumber}
+                      onChange={(e) => setMobileBankingNumber(e.target.value)}
+                      placeholder="01XXXXXXXXX"
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === "card" && (
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Bank Name
+                    </label>
+                    <input
+                      type="text"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      placeholder="Enter bank name"
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Account Number
+                    </label>
+                    <input
+                      type="text"
+                      value={bankAccountNumber}
+                      onChange={(e) => setBankAccountNumber(e.target.value)}
+                      placeholder="Enter account number"
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Internal Note
+                  </label>
+                  <textarea
+                    value={paymentNote}
+                    onChange={(e) => setPaymentNote(e.target.value)}
+                    rows={2}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    placeholder="Optional note for this sale"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-1 rounded-2xl bg-slate-50 px-3 py-2">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Payment Summary</div>
+                  <div className="mt-1.5 space-y-1.5 text-sm text-slate-600">
+                    <div className="flex items-center justify-between">
+                      <span>Selected method</span>
+                      <span className="font-medium text-slate-900">
+                        {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Estimated invoice total</span>
+                      <span className="font-semibold text-emerald-700">
+                        {formatCurrency(estimatedGrandTotal)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-1.5 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Final Payable</div>
+                  <div className="mt-0.5 text-xl font-semibold text-slate-900">
+                    {formatCurrency(estimatedGrandTotal)}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    Payment method: {PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethod)?.label || "Cash"}
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleSubmit}
+                  disabled={!canSubmitSale}
+                  className="rounded-full bg-sky-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
+                >
+                  {isSubmitting ? "Submitting..." : editing ? "Update Sale" : "Submit Sale"}
+                </button>
+              </div>
+            </div>
           </div>
         </section>
       </div>

@@ -10,7 +10,7 @@ import {
   FaUserShield,
 } from "react-icons/fa";
 
-import stockService from "../../services/stockService";
+import purchaseService from "../../services/purchaseService";
 
 const badgeTones = {
   created: "bg-emerald-50 text-emerald-700 ring-emerald-200",
@@ -51,7 +51,7 @@ export default function PurchaseImportHistory() {
       try {
         setLoading(true);
         setError("");
-        const data = await stockService.getProductPurchaseImportHistory();
+        const data = await purchaseService.getPurchases({ source: "excel" });
         setHistory(Array.isArray(data) ? data : []);
         if (Array.isArray(data) && data.length > 0) {
           setSelectedImportId(data[0].id);
@@ -76,7 +76,7 @@ export default function PurchaseImportHistory() {
       try {
         setLoadingDetail(true);
         setError("");
-        const data = await stockService.getProductPurchaseImportHistoryDetail(selectedImportId);
+        const data = await purchaseService.getPurchaseDetail(selectedImportId);
         setSelectedImport(data);
       } catch (err) {
         setError(err.response?.data?.detail || err.message || "Failed to load import details.");
