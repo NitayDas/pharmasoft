@@ -649,6 +649,11 @@ export default function CustomerProductSale() {
       }
 
       const remainingDue = Math.max(0, Number((effectiveGrandTotal - paidAmountValue).toFixed(2)));
+
+      if (createdSale?.id) {
+        window.open(`/sales/invoice/${createdSale.id}`, "_blank");
+      }
+
       toast.success(
         createdSale?.sale_no
           ? `Sale ${createdSale.sale_no} submitted successfully.${

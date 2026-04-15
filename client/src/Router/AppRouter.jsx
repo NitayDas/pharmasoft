@@ -7,6 +7,7 @@ import DashboardPage from "../pages/Dashboard/DashboardPage";
 import LoginPage from "../pages/Login/Login";
 import SalesPage from "../pages/Sales/Sales";
 import SalesPayments from "../pages/Sales/Payments";
+import SaleInvoice from "../pages/Sales/SaleInvoice";
 import Customers from "../pages/People/Customers";
 import PeoplePayments from "../pages/People/Payments";
 import Inventory from "../pages/Stock/Inventory";
@@ -19,6 +20,8 @@ import PurchaseImportHistory from "../pages/Stock/PurchaseImportHistory";
 export default function AppRouter() {
   return (
     <Routes>
+
+      <Route path="/sales/invoice/:invoiceId" element={<SaleInvoice />} />
 
       {/* Public routes */}
       <Route element={<Root />}>
