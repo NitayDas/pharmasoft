@@ -37,6 +37,16 @@ const staffService = {
     const { data } = await AxiosInstance.post(`${BASE}/${id}/change-password/`, payload);
     return data;
   },
+
+  async me() {
+    const { data } = await AxiosInstance.get(`${BASE}/me/`);
+    return data;
+  },
+
+  async updateMe(payload) {
+    const { data } = await AxiosInstance.patch(`${BASE}/me/`, payload);
+    return data;
+  },
 };
 
 export default staffService;

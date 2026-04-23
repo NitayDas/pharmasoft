@@ -122,6 +122,34 @@ class StaffUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class SelfProfileUpdateSerializer(serializers.ModelSerializer):
+    """Staff updating their own profile — restricted to safe fields only."""
+    first_name = serializers.CharField(source='user.first_name', required=False, allow_blank=True)
+    last_name = serializers.CharField(source='user.last_name', required=False, allow_blank=True)
+    email = serializers.EmailField(source='user.email', required=False)
+
+    class Meta:
+        model = Staff
+        fields = ['phone', 'address', 'first_name', 'last_name', 'email']
+
+    def validate_email(self, value):
+        user = self.instance.user
+        if User.objects.filter(email=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError('This email is already in use.')
+        return value
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop('user', {})
+        for attr, val in user_data.items():
+            setattr(instance.user, attr, val)
+        instance.user.save()
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
+        instance.save()
+        return instance
+
+
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=False, allow_blank=True)
     new_password = serializers.CharField(min_length=8)

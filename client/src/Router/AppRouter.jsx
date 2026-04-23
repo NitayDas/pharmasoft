@@ -15,6 +15,7 @@ import Products from "../pages/Stock/Products";
 import PurchaseImport from "../pages/Stock/PurchaseImport";
 import PurchaseImportHistory from "../pages/Stock/PurchaseImportHistory";
 import StaffList from "../pages/Staff/StaffList";
+import ProfilePage from "../pages/Profile/ProfilePage";
 
 
 
@@ -42,6 +43,7 @@ export default function AppRouter() {
         <Route path="/stock/purchase-import" element={<PurchaseImport />} />
         <Route path="/stock/purchase-import/history" element={<PurchaseImportHistory />} />
         <Route path="/staff" element={<StaffList />} />
+        <Route path="/profile" element={<ProfilePage />} />
       </Route>
 
     </Routes>

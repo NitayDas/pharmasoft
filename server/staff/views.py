@@ -8,6 +8,7 @@ from .models import Staff
 from .permissions import IsAdminOrSuperuser, IsAdminSuperuserOrSelf
 from .serializers import (
     ChangePasswordSerializer,
+    SelfProfileUpdateSerializer,
     StaffCreateSerializer,
     StaffListSerializer,
     StaffUpdateSerializer,
@@ -155,3 +156,27 @@ class StaffActivateView(APIView):
         staff.user.save()
         staff.save()
         return Response({'detail': 'Staff member activated successfully.'}, status=status.HTTP_200_OK)
+
+
+class StaffMeView(APIView):
+    """Current authenticated user's own staff profile."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_my_staff(self, request):
+        return Staff.objects.select_related('user', 'created_by').filter(user=request.user).first()
+
+    def get(self, request):
+        staff = self._get_my_staff(request)
+        if not staff:
+            return Response({'detail': 'No staff profile linked to this account.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(StaffListSerializer(staff).data)
+
+    def patch(self, request):
+        staff = self._get_my_staff(request)
+        if not staff:
+            return Response({'detail': 'No staff profile linked to this account.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = SelfProfileUpdateSerializer(staff, data=request.data, partial=True)
+        if serializer.is_valid():
+            staff = serializer.save()
+            return Response(StaffListSerializer(staff).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

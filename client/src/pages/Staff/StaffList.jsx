@@ -62,6 +62,7 @@ export default function StaffList() {
   const [editingId, setEditingId] = useState(null);
   const [staffForm, setStaffForm] = useState(EMPTY_STAFF_FORM);
   const [saving, setSaving] = useState(false);
+  const [usernameManual, setUsernameManual] = useState(false);
 
   // ── Change-password modal ────────────────────────────────────
   const [pwTarget, setPwTarget] = useState(null); // staff object
@@ -114,6 +115,7 @@ export default function StaffList() {
   const openCreateForm = () => {
     setEditingId(null);
     setStaffForm(EMPTY_STAFF_FORM);
+    setUsernameManual(false);
     setError("");
     setShowForm(true);
   };
@@ -139,12 +141,35 @@ export default function StaffList() {
   const closeForm = () => {
     setShowForm(false);
     setEditingId(null);
+    setUsernameManual(false);
     setError("");
   };
 
+  const slugify = (str) =>
+    str.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
   const handleStaffFormChange = (e) => {
     const { name, value } = e.target;
-    setStaffForm((prev) => ({ ...prev, [name]: value }));
+
+    if (name === "username") {
+      // Once the user manually types a username, stop auto-generating
+      setUsernameManual(true);
+      setStaffForm((prev) => ({ ...prev, username: value }));
+      return;
+    }
+
+    setStaffForm((prev) => {
+      const next = { ...prev, [name]: value };
+
+      // Auto-generate username from first + last name in create mode
+      if (!editingId && !usernameManual && (name === "first_name" || name === "last_name")) {
+        const first = slugify(name === "first_name" ? value : prev.first_name);
+        const last = slugify(name === "last_name" ? value : prev.last_name);
+        next.username = first && last ? `${first}.${last}` : first || last;
+      }
+
+      return next;
+    });
   };
 
   const handleStaffSubmit = async (e) => {
@@ -502,20 +527,44 @@ export default function StaffList() {
                   {/* Username — create only */}
                   {!editingId && (
                     <div>
-                      <label className="mb-1 block text-xs font-semibold text-slate-700">
-                        Username <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        name="username"
-                        value={staffForm.username}
-                        onChange={handleStaffFormChange}
-                        required
-                        autoComplete="off"
-                        placeholder="e.g. john_doe"
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                      />
+                      <div className="mb-1 flex items-center justify-between">
+                        <label className="text-xs font-semibold text-slate-700">
+                          Username <span className="text-red-500">*</span>
+                        </label>
+                        {staffForm.username && (
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${usernameManual ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-600"}`}>
+                            {usernameManual ? "custom" : "auto"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <input
+                          name="username"
+                          value={staffForm.username}
+                          onChange={handleStaffFormChange}
+                          required
+                          autoComplete="off"
+                          placeholder="Enter first & last name to auto-fill"
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                        />
+                        {usernameManual && staffForm.username && (
+                          <button
+                            type="button"
+                            title="Reset to auto-generated"
+                            onClick={() => {
+                              setUsernameManual(false);
+                              const first = slugify(staffForm.first_name);
+                              const last = slugify(staffForm.last_name);
+                              setStaffForm((p) => ({ ...p, username: first && last ? `${first}.${last}` : first || last }));
+                            }}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 hover:text-emerald-600 transition"
+                          >
+                            ↺ auto
+                          </button>
+                        )}
+                      </div>
                       <p className="mt-0.5 text-[11px] text-slate-400">
-                        Staff will use this to log in.
+                        Staff will use this to log in. Auto-filled from name.
                       </p>
                     </div>
                   )}
