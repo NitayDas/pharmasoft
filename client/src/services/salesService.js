@@ -87,6 +87,29 @@ export const salesService = {
   async deleteCustomer(customerId) {
     await AxiosInstance.delete(`${SALES_BASE}/customers/${customerId}/`);
   },
+
+  // Invoice payments
+  async getInvoicePayments(invoiceId) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/invoices/${invoiceId}/payments/`);
+    return data;
+  },
+
+  async createInvoicePayment(invoiceId, payload) {
+    const { data } = await AxiosInstance.post(`${SALES_BASE}/invoices/${invoiceId}/payments/`, payload);
+    return data;
+  },
+
+  // Sales payments list (for Sales/Payments page)
+  async getPayments(params = {}) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/payments/`, { params });
+    return data;
+  },
+
+  // Customer ledger
+  async getCustomerLedger(customerId) {
+    const { data } = await AxiosInstance.get(`${SALES_BASE}/customers/${customerId}/ledger/`);
+    return data;
+  },
 };
 
 export default salesService;

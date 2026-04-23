@@ -6,14 +6,20 @@ import { useUser } from '../../Provider/UserProvider';
 import salesService from '../../services/salesService';
 import './DashboardPage.css';
 
-const KPI_LABELS = [
-  { label: 'Total Sales', accent: 'is-blue', key: 'total_sales' },
-  { label: 'Total Discount', accent: 'is-violet', key: 'total_discount' },
-  { label: 'Invoice Count', accent: 'is-orange', key: 'sale_count' },
+const TODAY_KPIS = [
+  { label: "Today's Sales", accent: 'is-blue', key: 'total_sales', money: true },
+  { label: "Today Collected", accent: 'is-emerald', key: 'today_collected', money: true },
+  { label: "Today Invoices", accent: 'is-orange', key: 'sale_count', money: false },
+];
+
+const ALERT_KPIS = [
+  { label: 'Outstanding Due', accent: 'is-red', key: 'total_outstanding_due', money: true },
+  { label: 'Low Stock Items', accent: 'is-amber', key: 'low_stock_count', money: false },
+  { label: 'Expiring Soon', accent: 'is-amber', key: 'expiring_soon_count', money: false, sub: '(30 days)' },
+  { label: 'Expired Products', accent: 'is-rose', key: 'expired_count', money: false },
 ];
 
 const QUICK_ACTIONS = [
-  { label: 'Pay with Points', color: 'is-indigo', action: 'points' },
   { label: 'Full Paid', color: 'is-amber', action: 'full_paid' },
   { label: 'Cash Payment', color: 'is-green', action: 'cash' },
   { label: 'Card Payment', color: 'is-teal', action: 'card' },
@@ -23,6 +29,11 @@ const EMPTY_SUMMARY = {
   total_sales: 0,
   total_discount: 0,
   sale_count: 0,
+  today_collected: 0,
+  total_outstanding_due: 0,
+  low_stock_count: 0,
+  expiring_soon_count: 0,
+  expired_count: 0,
   latest_sale: null,
 };
 
@@ -148,14 +159,24 @@ export default function DashboardPage() {
     <main className="db-main">
       <section className="db-content">
         <div className="db-kpi-grid">
-          {KPI_LABELS.map((item) => (
+          {TODAY_KPIS.map((item) => (
             <div key={item.label} className="db-card db-kpi-card">
               <div className="db-kpi-label">{item.label}</div>
               <div className={`db-kpi-value ${item.accent}`}>
-                {item.key === 'sale_count'
-                  ? dashboardSummary[item.key]
-                  : formatMoney(dashboardSummary[item.key])}
+                {item.money ? formatMoney(dashboardSummary[item.key]) : dashboardSummary[item.key]}
               </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="db-kpi-grid-4">
+          {ALERT_KPIS.map((item) => (
+            <div key={item.label} className="db-card db-kpi-card">
+              <div className="db-kpi-label">{item.label}</div>
+              <div className={`db-kpi-value ${item.accent}`}>
+                {item.money ? formatMoney(dashboardSummary[item.key]) : dashboardSummary[item.key]}
+              </div>
+              {item.sub && <div className="db-kpi-sub">{item.sub}</div>}
             </div>
           ))}
         </div>

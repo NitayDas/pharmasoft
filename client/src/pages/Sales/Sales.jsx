@@ -167,9 +167,7 @@ export default function CustomerProductSale() {
         const productsData = await salesService.getProducts();
         setProductList(productsData);
 
-        console.log("Fetched products:", productsData);
       } catch (error) {
-        console.error("Error fetching Product data:", error);
         toast.error("Failed to load products.");
       }
     };
@@ -182,9 +180,7 @@ export default function CustomerProductSale() {
       try {
         const customersData = await salesService.getCustomers();
         setCustomers(customersData);
-        console.log("Fetched customers:", customersData);
       } catch (error) {
-        console.error("Error fetching Customer data:", error);
         toast.error("Failed to load customers.");
       }
     };
@@ -229,7 +225,6 @@ export default function CustomerProductSale() {
         // ---------- Edit Mode ----------
         setEditing(true);
       } catch (err) {
-        console.error(err);
         toast.error("Failed to fetch sale for edit");
       }
     };
@@ -643,7 +638,6 @@ export default function CustomerProductSale() {
           });
           effectiveGrandTotal = Number(updatedSale?.grand_total ?? effectiveGrandTotal);
         } catch (patchError) {
-          console.error("Payment update warning:", patchError.response?.data || patchError);
           toast.error("Sale saved, but payment update failed. Please adjust payment from invoice details.");
         }
       }
@@ -666,7 +660,6 @@ export default function CustomerProductSale() {
       setProductList(updatedProducts);
       resetForm();
     } catch (error) {
-      console.error("Submission error:", error.response?.data || error);
       if (error.response?.data) {
         const data = error.response.data;
         if (data.items && Array.isArray(data.items)) {

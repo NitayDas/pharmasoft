@@ -81,6 +81,3 @@ class ManualPurchaseCreateSerializer(serializers.Serializer):
     def validate_sku(self, value):
         return value.strip()
 
-    def create(self, validated_data):
-        raise NotImplementedError
-

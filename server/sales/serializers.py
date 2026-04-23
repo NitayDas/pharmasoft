@@ -6,25 +6,47 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
-    Product,
-    Sale,
-    SaleItem,
     Customer,
-    Stock,
+    PaymentTransaction,
+    Product,
     PurchaseImportBatch,
     PurchaseImportRow,
+    Sale,
+    SaleItem,
+    Stock,
+    StockMovement,
 )
 
 User = get_user_model()
+
+VAT_RATE = Decimal('0.03')
 
 
 class ProductSerializer(serializers.ModelSerializer):
     stock_quantity = serializers.IntegerField(write_only=True, required=False, min_value=0)
     current_stock = serializers.IntegerField(source='stock.quantity', read_only=True)
+    is_low_stock = serializers.SerializerMethodField()
+    is_expiring_soon = serializers.BooleanField(read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Product
-        fields = ['id', 'name', 'sku', 'batch', 'unit', 'unit_price', 'stock_quantity', 'current_stock', 'is_active']
+        fields = [
+            'id', 'name', 'generic_name', 'sku', 'barcode',
+            'category', 'manufacturer',
+            'unit', 'batch', 'expiry_date',
+            'purchase_price', 'unit_price',
+            'reorder_level', 'is_active',
+            'stock_quantity', 'current_stock',
+            'is_low_stock', 'is_expiring_soon', 'is_expired',
+            'created_at', 'updated_at',
+        ]
+
+    def get_is_low_stock(self, obj):
+        try:
+            return obj.stock.quantity <= obj.reorder_level
+        except Exception:
+            return True
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -39,16 +61,13 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         stock_quantity = validated_data.pop('stock_quantity', None)
-
         for attr, value in validated_data.items():
-          setattr(instance, attr, value)
+            setattr(instance, attr, value)
         instance.save()
-
         if stock_quantity is not None:
             stock, _ = Stock.objects.get_or_create(product=instance)
             stock.quantity = stock_quantity
             stock.save(update_fields=['quantity', 'updated_at'])
-
         return instance
 
 
@@ -74,30 +93,111 @@ class SaleItemCreateSerializer(serializers.Serializer):
     unit = serializers.CharField(max_length=32, required=False, allow_blank=True)
     qty = serializers.IntegerField(min_value=1)
     unit_price = serializers.DecimalField(max_digits=10, decimal_places=2)
-    discount_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    discount_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, default=Decimal('0.00'))
+
+
+class PaymentTransactionSerializer(serializers.ModelSerializer):
+    received_by_username = serializers.CharField(source='received_by.username', read_only=True)
+    sale_no = serializers.CharField(source='sale.sale_no', read_only=True)
+    customer_name = serializers.CharField(source='sale.customer_name', read_only=True)
+
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            'id', 'sale', 'sale_no', 'customer_name',
+            'amount', 'payment_method', 'payment_date',
+            'reference_number', 'mobile_provider', 'note',
+            'received_by', 'received_by_username', 'created_at',
+        ]
+        read_only_fields = ['received_by', 'created_at']
+
+
+class PaymentTransactionCreateSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
+    payment_method = serializers.ChoiceField(choices=PaymentTransaction.PAYMENT_METHOD_CHOICES)
+    payment_date = serializers.DateField(required=False)
+    reference_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    mobile_provider = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_amount(self, value):
+        sale = self.context.get('sale')
+        if sale and value > sale.due_amount:
+            raise serializers.ValidationError(
+                f'Amount ৳{value} exceeds outstanding due ৳{sale.due_amount}.'
+            )
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        sale = self.context['sale']
+        user = self.context['request'].user
+        amount = validated_data['amount']
+
+        txn = PaymentTransaction.objects.create(
+            sale=sale,
+            amount=amount,
+            payment_method=validated_data['payment_method'],
+            payment_date=validated_data.get('payment_date', timezone.localdate()),
+            reference_number=validated_data.get('reference_number', ''),
+            mobile_provider=validated_data.get('mobile_provider', ''),
+            note=validated_data.get('note', ''),
+            received_by=user,
+        )
+
+        # Recalculate Sale totals from all transactions
+        total_paid = sale.transactions.aggregate(
+            total=__import__('django.db.models', fromlist=['Sum']).Sum('amount')
+        )['total'] or Decimal('0.00')
+
+        old_due = sale.due_amount
+        sale.paid_amount = min(total_paid, sale.grand_total)
+        sale.due_amount = max(Decimal('0.00'), sale.grand_total - sale.paid_amount)
+        sale.payment_method = validated_data['payment_method']
+        sale.save(update_fields=['paid_amount', 'due_amount', 'payment_method'])
+
+        # Propagate to customer
+        if sale.customer_id:
+            due_delta = sale.due_amount - old_due
+            if due_delta:
+                customer = sale.customer
+                customer.total_due_amount = max(Decimal('0.00'), customer.total_due_amount + due_delta)
+                customer.save(update_fields=['total_due_amount'])
+
+        return txn
 
 
 class SaleSerializer(serializers.ModelSerializer):
     items = SaleItemSerializer(many=True)
     served_by_username = serializers.CharField(source='served_by.username', read_only=True)
+    payment_status = serializers.CharField(read_only=True)
+    transactions = PaymentTransactionSerializer(many=True, read_only=True)
+    customer_id = serializers.IntegerField(source='customer.id', read_only=True, allow_null=True)
 
     class Meta:
         model = Sale
         fields = [
-            'id', 'sale_no', 'customer_name', 'contact_number', 'sale_date', 'served_by',
-            'served_by_username', 'payment_method', 'subtotal', 'discount_amount', 'vat_amount',
-            'grand_total', 'paid_amount', 'due_amount', 'notes', 'items', 'created_at',
+            'id', 'sale_no', 'customer', 'customer_id', 'customer_name', 'contact_number',
+            'sale_date', 'served_by', 'served_by_username', 'payment_method',
+            'subtotal', 'discount_amount', 'vat_amount', 'grand_total',
+            'paid_amount', 'due_amount', 'payment_status', 'notes',
+            'items', 'transactions', 'created_at',
         ]
-        read_only_fields = ['subtotal', 'discount_amount', 'vat_amount', 'grand_total', 'paid_amount', 'due_amount', 'created_at']
+        read_only_fields = [
+            'subtotal', 'discount_amount', 'vat_amount', 'grand_total',
+            'paid_amount', 'due_amount', 'created_at',
+        ]
 
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items')
         contact_number = validated_data.get('contact_number', '').strip()
+        request_user = self.context['request'].user
+
         subtotal = Decimal('0')
         discount_amount = Decimal('0')
 
-        # Try to link to existing customer by phone
+        # Link to existing customer by phone
         customer = None
         if contact_number:
             customer = Customer.objects.filter(phone=contact_number).first()
@@ -105,6 +205,7 @@ class SaleSerializer(serializers.ModelSerializer):
         sale = Sale.objects.create(
             sale_no=self._generate_sale_no(),
             customer=customer,
+            served_by=request_user,
             subtotal=Decimal('0'),
             discount_amount=Decimal('0'),
             vat_amount=Decimal('0'),
@@ -120,15 +221,15 @@ class SaleSerializer(serializers.ModelSerializer):
             unit_price = Decimal(item_data['unit_price'])
             discount_percent = Decimal(item_data.get('discount_percent', 0))
 
-            available_stock = getattr(product.stock, 'quantity', 0)
-            if available_stock < int(qty):
+            stock, _ = Stock.objects.select_for_update().get_or_create(product=product)
+            if stock.quantity < int(qty):
                 raise serializers.ValidationError({
-                    'items': [f'Insufficient stock for {product.name}. Available: {available_stock}.']
+                    'items': [f'Insufficient stock for {product.name}. Available: {stock.quantity}.']
                 })
 
             gross_amount = qty * unit_price
-            line_discount_amount = (gross_amount * discount_percent) / Decimal('100')
-            net_amount = gross_amount - line_discount_amount
+            line_discount = (gross_amount * discount_percent) / Decimal('100')
+            net_amount = gross_amount - line_discount
 
             SaleItem.objects.create(
                 sale=sale,
@@ -140,68 +241,104 @@ class SaleSerializer(serializers.ModelSerializer):
                 unit_price=unit_price,
                 discount_percent=discount_percent,
                 gross_amount=gross_amount,
-                discount_amount=line_discount_amount,
+                discount_amount=line_discount,
                 net_amount=net_amount,
             )
 
             subtotal += gross_amount
-            discount_amount += line_discount_amount
+            discount_amount += line_discount
 
-            stock, _ = Stock.objects.get_or_create(product=product)
+            qty_before = stock.quantity
             stock.quantity -= int(qty)
             stock.save(update_fields=['quantity', 'updated_at'])
 
-        vat_amount = (subtotal * Decimal('0.03')).quantize(Decimal('0.01'))
+            StockMovement.objects.create(
+                product=product,
+                movement_type='sale',
+                quantity=-int(qty),
+                quantity_before=qty_before,
+                quantity_after=stock.quantity,
+                reference=sale.sale_no,
+                note=f'Sale {sale.sale_no}',
+                created_by=request_user,
+            )
+
+        vat_amount = (subtotal * VAT_RATE).quantize(Decimal('0.01'))
         grand_total = subtotal - discount_amount + vat_amount
-        paid_amount = grand_total
-        due_amount = Decimal('0')
+        initial_paid = validated_data.get('paid_amount', grand_total)
+        initial_paid = min(Decimal(str(initial_paid)), grand_total)
+        due_amount = max(Decimal('0'), grand_total - initial_paid)
 
         sale.subtotal = subtotal
         sale.discount_amount = discount_amount
         sale.vat_amount = vat_amount
         sale.grand_total = grand_total
-        sale.paid_amount = paid_amount
+        sale.paid_amount = initial_paid
         sale.due_amount = due_amount
-        sale.save(update_fields=['subtotal', 'discount_amount', 'vat_amount', 'grand_total', 'paid_amount', 'due_amount'])
+        sale.save(update_fields=[
+            'subtotal', 'discount_amount', 'vat_amount',
+            'grand_total', 'paid_amount', 'due_amount',
+        ])
 
-        # Update customer totals if linked
+        # Create a PaymentTransaction if any amount was paid at time of sale
+        if initial_paid > 0:
+            PaymentTransaction.objects.create(
+                sale=sale,
+                amount=initial_paid,
+                payment_method=sale.payment_method,
+                payment_date=sale.sale_date,
+                note='Payment at time of sale',
+                received_by=request_user,
+            )
+
         if customer:
-            customer.total_purchase_amount += grand_total
-            customer.total_due_amount += due_amount
+            customer.total_purchase_amount = (
+                Customer.objects.filter(pk=customer.pk)
+                .values_list('total_purchase_amount', flat=True)
+                .first()
+            ) + grand_total
+            customer.total_due_amount = max(
+                Decimal('0.00'),
+                Customer.objects.filter(pk=customer.pk)
+                .values_list('total_due_amount', flat=True)
+                .first() + due_amount,
+            )
             customer.save(update_fields=['total_purchase_amount', 'total_due_amount'])
 
         return sale
 
     def _generate_sale_no(self):
-        last_sale = Sale.objects.order_by('-id').first()
-        next_number = 1 if not last_sale else last_sale.id + 1
-        return f'SL-{next_number:06d}'
+        from django.db.models import Max
+        max_id = Sale.objects.aggregate(m=Max('id'))['m'] or 0
+        return f'SL-{max_id + 1:06d}'
 
 
 class SaleCreateSerializer(serializers.Serializer):
     customer_name = serializers.CharField(max_length=255)
     contact_number = serializers.CharField(max_length=32, required=False, allow_blank=True)
     sale_date = serializers.DateField(required=False)
-    served_by = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
     payment_method = serializers.ChoiceField(choices=Sale.PAYMENT_METHOD_CHOICES)
     notes = serializers.CharField(required=False, allow_blank=True)
+    paid_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, min_value=Decimal('0.00'))
     items = SaleItemCreateSerializer(many=True)
 
     def create(self, validated_data):
-        sale_serializer = SaleSerializer()
+        sale_serializer = SaleSerializer(context=self.context)
         return sale_serializer.create({
             'customer_name': validated_data['customer_name'],
             'contact_number': validated_data.get('contact_number', ''),
             'sale_date': validated_data.get('sale_date', timezone.localdate()),
-            'served_by': validated_data['served_by'],
             'payment_method': validated_data['payment_method'],
             'notes': validated_data.get('notes', ''),
+            'paid_amount': validated_data.get('paid_amount'),
             'items': validated_data['items'],
         })
 
 
 class SaleInvoiceUpdateSerializer(serializers.ModelSerializer):
-    paid_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, min_value=Decimal('0.00'))
+    paid_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, min_value=Decimal('0.00')
+    )
     payment_method = serializers.ChoiceField(choices=Sale.PAYMENT_METHOD_CHOICES, required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
 
@@ -212,35 +349,30 @@ class SaleInvoiceUpdateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         instance = self.instance
         paid_amount = attrs.get('paid_amount', instance.paid_amount)
-
         if paid_amount > instance.grand_total:
             raise serializers.ValidationError({
                 'paid_amount': 'Paid amount cannot exceed the invoice total.',
             })
-
         return attrs
 
     @transaction.atomic
     def update(self, instance, validated_data):
         old_due = instance.due_amount
-
         for field in ['payment_method', 'notes']:
             if field in validated_data:
                 setattr(instance, field, validated_data[field])
-
         if 'paid_amount' in validated_data:
             instance.paid_amount = validated_data['paid_amount']
-
         instance.due_amount = instance.grand_total - instance.paid_amount
         instance.save(update_fields=['payment_method', 'notes', 'paid_amount', 'due_amount'])
-
         if instance.customer_id:
             due_delta = instance.due_amount - old_due
             if due_delta:
                 customer = instance.customer
-                customer.total_due_amount = max(Decimal('0.00'), customer.total_due_amount + due_delta)
+                customer.total_due_amount = max(
+                    Decimal('0.00'), customer.total_due_amount + due_delta
+                )
                 customer.save(update_fields=['total_due_amount'])
-
         return instance
 
 
@@ -248,28 +380,16 @@ class CustomerSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='name', required=False)
     phone1 = serializers.CharField(source='phone', required=False)
     previous_due_amount = serializers.DecimalField(
-        source='total_due_amount',
-        max_digits=12,
-        decimal_places=2,
-        required=False,
+        source='total_due_amount', max_digits=12, decimal_places=2, required=False,
     )
 
     class Meta:
         model = Customer
         fields = [
-            'id',
-            'name',
-            'phone',
-            'customer_name',
-            'phone1',
-            'email',
-            'address',
-            'previous_due_amount',
-            'total_purchase_amount',
-            'total_due_amount',
-            'medicine_history',
-            'created_at',
-            'updated_at',
+            'id', 'name', 'phone', 'customer_name', 'phone1',
+            'email', 'address', 'previous_due_amount',
+            'total_purchase_amount', 'total_due_amount',
+            'medicine_history', 'created_at', 'updated_at',
         ]
         read_only_fields = ['total_purchase_amount', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -284,7 +404,6 @@ class CustomerSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if self.instance and self.partial:
             return attrs
-
         if not attrs.get('name'):
             raise serializers.ValidationError({'customer_name': 'Customer name is required.'})
         if not attrs.get('phone'):
@@ -292,20 +411,25 @@ class CustomerSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class StockMovementSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = StockMovement
+        fields = [
+            'id', 'product', 'product_name', 'movement_type', 'quantity',
+            'quantity_before', 'quantity_after', 'reference', 'note',
+            'created_by', 'created_by_username', 'created_at',
+        ]
+
+
 class PurchaseImportRowSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseImportRow
         fields = [
-            'id',
-            'row_number',
-            'action',
-            'product',
-            'product_name',
-            'sku',
-            'quantity_added',
-            'stock_before',
-            'stock_after',
-            'message',
+            'id', 'row_number', 'action', 'product', 'product_name',
+            'sku', 'quantity_added', 'stock_before', 'stock_after', 'message',
         ]
 
 
@@ -317,19 +441,9 @@ class PurchaseImportBatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseImportBatch
         fields = [
-            'id',
-            'file_name',
-            'uploaded_by',
-            'uploaded_by_username',
-            'total_rows',
-            'processed_rows',
-            'created_products',
-            'updated_products',
-            'failed_rows',
-            'total_quantity_added',
-            'created_at',
-            'summary',
-            'results',
+            'id', 'file_name', 'uploaded_by', 'uploaded_by_username',
+            'total_rows', 'processed_rows', 'created_products', 'updated_products',
+            'failed_rows', 'total_quantity_added', 'created_at', 'summary', 'results',
         ]
 
     def get_summary(self, obj):

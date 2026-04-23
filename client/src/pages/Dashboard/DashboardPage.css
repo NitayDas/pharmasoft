@@ -183,6 +183,18 @@
   gap: 18px;
 }
 
+.db-kpi-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.db-kpi-value.is-emerald { color: #059669; }
+.db-kpi-value.is-amber  { color: #d97706; }
+.db-kpi-value.is-red    { color: #dc2626; }
+.db-kpi-value.is-rose   { color: #e11d48; }
+.db-kpi-sub { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+
 .db-card {
   background: #fff;
   border-radius: 24px;
@@ -560,8 +572,9 @@
     align-items: flex-start;
   }
 
-  .db-kpi-grid {
-    grid-template-columns: 1fr;
+  .db-kpi-grid,
+  .db-kpi-grid-4 {
+    grid-template-columns: 1fr 1fr;
   }
 
   .db-table-wrap {

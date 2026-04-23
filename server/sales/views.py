@@ -1,10 +1,11 @@
 import csv
 import io
 import re
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import F, Prefetch
 from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -14,14 +15,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Product, Sale, Customer, Stock, PurchaseImportBatch, PurchaseImportRow
+from .models import PaymentTransaction, Product, Sale, Customer, Stock, PurchaseImportBatch, PurchaseImportRow
 from .serializers import (
+    CustomerSerializer,
+    PaymentTransactionCreateSerializer,
+    PaymentTransactionSerializer,
     ProductSerializer,
+    PurchaseImportBatchSerializer,
     SaleCreateSerializer,
     SaleInvoiceUpdateSerializer,
     SaleSerializer,
-    CustomerSerializer,
-    PurchaseImportBatchSerializer,
 )
 
 
@@ -56,8 +59,10 @@ def base_sale_queryset():
         'product__name',
         'product__sku',
     )
+    txn_queryset = PaymentTransaction.objects.select_related('received_by').order_by('-created_at')
     return Sale.objects.select_related('served_by', 'customer').prefetch_related(
-        Prefetch('items', queryset=sale_item_queryset)
+        Prefetch('items', queryset=sale_item_queryset),
+        Prefetch('transactions', queryset=txn_queryset),
     )
 
 
@@ -522,6 +527,8 @@ class DashboardSummaryView(APIView):
 
     def get(self, request):
         today = timezone.localdate()
+        expiry_threshold = today + timedelta(days=30)
+
         sales_today = Sale.objects.filter(sale_date=today)
         summary = sales_today.aggregate(
             total_sales=Coalesce(
@@ -536,6 +543,40 @@ class DashboardSummaryView(APIView):
             ),
             sale_count=Count('id'),
         )
+
+        today_collected = PaymentTransaction.objects.filter(payment_date=today).aggregate(
+            total=Coalesce(
+                Sum('amount'),
+                Value(Decimal('0.00')),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )['total']
+
+        total_outstanding_due = Sale.objects.aggregate(
+            total=Coalesce(
+                Sum('due_amount'),
+                Value(Decimal('0.00')),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )['total']
+
+        low_stock_count = Stock.objects.filter(
+            quantity__lte=F('product__reorder_level')
+        ).count()
+
+        expiring_soon_count = Product.objects.filter(
+            is_active=True,
+            expiry_date__isnull=False,
+            expiry_date__lte=expiry_threshold,
+            expiry_date__gte=today,
+        ).count()
+
+        expired_count = Product.objects.filter(
+            is_active=True,
+            expiry_date__isnull=False,
+            expiry_date__lt=today,
+        ).count()
+
         latest_sale = base_sale_queryset().order_by('-created_at').first()
 
         return Response({
@@ -543,7 +584,113 @@ class DashboardSummaryView(APIView):
             'total_sales': summary['total_sales'],
             'total_discount': summary['total_discount'],
             'sale_count': summary['sale_count'],
+            'today_collected': today_collected,
+            'total_outstanding_due': total_outstanding_due,
+            'low_stock_count': low_stock_count,
+            'expiring_soon_count': expiring_soon_count,
+            'expired_count': expired_count,
             'latest_sale': SaleSerializer(latest_sale).data if latest_sale else None,
+        })
+
+
+class InvoicePaymentListCreateView(APIView):
+    """List or record payments for a specific invoice."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_sale(self, pk):
+        return Sale.objects.get(pk=pk)
+
+    def get(self, request, pk):
+        try:
+            sale = self._get_sale(pk)
+        except Sale.DoesNotExist:
+            return Response({'detail': 'Invoice not found.'}, status=status.HTTP_404_NOT_FOUND)
+        txns = PaymentTransaction.objects.filter(sale=sale).select_related('received_by').order_by('-created_at')
+        return Response(PaymentTransactionSerializer(txns, many=True).data)
+
+    @transaction.atomic
+    def post(self, request, pk):
+        try:
+            sale = Sale.objects.select_for_update().get(pk=pk)
+        except Sale.DoesNotExist:
+            return Response({'detail': 'Invoice not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if sale.due_amount <= 0:
+            return Response({'detail': 'Invoice is already fully paid.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = PaymentTransactionCreateSerializer(
+            data=request.data,
+            context={'sale': sale, 'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        txn = serializer.save()
+        return Response(PaymentTransactionSerializer(txn).data, status=status.HTTP_201_CREATED)
+
+
+class SalesPaymentListView(APIView):
+    """List all sales with payment status — used by the Sales/Payments page."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        date_from = request.query_params.get('date_from', '').strip()
+        date_to = request.query_params.get('date_to', '').strip()
+        payment_method = request.query_params.get('payment_method', '').strip()
+        payment_status_filter = request.query_params.get('payment_status', '').strip().lower()
+        search = request.query_params.get('search', '').strip()
+
+        sales = base_sale_queryset()
+
+        if date_from:
+            sales = sales.filter(sale_date__gte=date_from)
+        if date_to:
+            sales = sales.filter(sale_date__lte=date_to)
+        if payment_method:
+            sales = sales.filter(payment_method=payment_method)
+        if payment_status_filter == 'paid':
+            sales = sales.filter(due_amount__lte=0)
+        elif payment_status_filter == 'partial':
+            sales = sales.filter(paid_amount__gt=0, due_amount__gt=0)
+        elif payment_status_filter == 'unpaid':
+            sales = sales.filter(paid_amount=0, due_amount__gt=0)
+        if search:
+            sales = sales.filter(
+                Q(sale_no__icontains=search) |
+                Q(customer_name__icontains=search) |
+                Q(contact_number__icontains=search)
+            )
+
+        sales = sales.order_by('-sale_date', '-created_at')
+        return Response(SaleSerializer(sales, many=True).data)
+
+
+class CustomerLedgerView(APIView):
+    """Full purchase + payment ledger for a customer."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            customer = Customer.objects.get(pk=pk)
+        except Customer.DoesNotExist:
+            return Response({'detail': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        sales = base_sale_queryset().filter(customer=customer).order_by('-sale_date', '-created_at')
+        sales_data = SaleSerializer(sales, many=True).data
+
+        total_paid = PaymentTransaction.objects.filter(sale__customer=customer).aggregate(
+            total=Coalesce(
+                Sum('amount'),
+                Value(Decimal('0.00')),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            )
+        )['total']
+
+        return Response({
+            'customer': CustomerSerializer(customer).data,
+            'invoices': sales_data,
+            'summary': {
+                'total_invoices': sales.count(),
+                'total_purchase': str(customer.total_purchase_amount),
+                'total_paid': str(total_paid),
+                'total_due': str(customer.total_due_amount),
+            },
         })
 
 
