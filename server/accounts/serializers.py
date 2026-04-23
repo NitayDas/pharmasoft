@@ -42,5 +42,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_role(self, value):
         allowed_roles = {choice[0] for choice in User.ROLE_CHOICES}
         if value not in allowed_roles:
-            raise serializers.ValidationError('Role must be employee or user.')
+            raise serializers.ValidationError(
+                f'Invalid role. Allowed: {", ".join(allowed_roles)}.'
+            )
         return value

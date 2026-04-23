@@ -318,6 +318,27 @@ export default function DashboardPage() {
             >
               View All Invoices
             </button>
+
+            {(user?.is_superuser || user?.role === 'admin') && (
+              <>
+                <div className="db-actions-divider" />
+                <div className="db-actions-section-label">Staff</div>
+                <button
+                  type="button"
+                  className="db-action-btn is-emerald"
+                  onClick={() => navigate('/staff', { state: { openForm: true } })}
+                >
+                  + Create Staff
+                </button>
+                <button
+                  type="button"
+                  className="db-action-btn"
+                  onClick={() => navigate('/staff')}
+                >
+                  Manage Staff
+                </button>
+              </>
+            )}
           </aside>
         </div>
       </section>

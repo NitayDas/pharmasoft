@@ -6,9 +6,11 @@ class User(AbstractUser):
     ROLE_CHOICES = [
         ('employee', 'Employee'),
         ('user', 'User'),
+        ('admin', 'Admin'),
+        ('sales_representative', 'Sales Representative'),
     ]
     email = models.EmailField(unique=True)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='employee')
+    role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='employee')
     phone = models.CharField(max_length=15, blank=True)
     is_active = models.BooleanField(default=True)
 
